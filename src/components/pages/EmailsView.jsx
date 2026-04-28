@@ -14,29 +14,44 @@ import { Card, CardContent } from "../ui/card";
 
 export default function EmailsView({ inboxItems, setInboxItems }) {
   const [gmailConnected, setGmailConnected] = useState(false);
+  const [gmailError, setGmailError] = useState("");
   const [loadingEmails, setLoadingEmails] = useState(false);
 
   const fetchGmailEmails = useCallback(async () => {
     try {
       setLoadingEmails(true);
+      setGmailError("");
 
       const data = await getGmailEmails();
 
-      if (data.emails) {
-        const formattedEmails = data.emails.map((email, index) => ({
-          id: email.id || index,
-          from: email.from,
-          subject: email.subject || "No subject",
-          urgency: "Medium",
-          summary: email.snippet || "No preview available.",
-          draft: "",
-        }));
+      if (!data.ok) {
+        setInboxItems([]);
+        setGmailError(
+          data.error ||
+            "Gmail is connected, but the inbox could not be loaded. Try reconnecting Gmail."
+        );
 
-        setInboxItems(formattedEmails);
-        setGmailConnected(true);
+        if (data.status === 401 || data.status === 403) {
+          setGmailConnected(false);
+        }
+
+        return;
       }
+
+      const formattedEmails = (data.emails || []).map((email, index) => ({
+        id: email.id || index,
+        from: email.from,
+        subject: email.subject || "No subject",
+        urgency: "Medium",
+        summary: email.snippet || "No preview available.",
+        draft: "",
+      }));
+
+      setInboxItems(formattedEmails);
+      setGmailConnected(true);
     } catch {
-      alert("Could not fetch Gmail emails.");
+      setInboxItems([]);
+      setGmailError("Could not reach the Gmail backend.");
     } finally {
       setLoadingEmails(false);
     }
@@ -79,18 +94,31 @@ Context: ${summary}
     async function checkGmailStatus() {
       try {
         const data = await getGmailStatus();
-        setGmailConnected(Boolean(data.connected));
+        const isConnected = Boolean(data.ok && data.connected);
+        setGmailConnected(isConnected);
 
-        if (data.connected) {
+        if (isConnected) {
           fetchGmailEmails();
+        } else {
+          setInboxItems([]);
         }
       } catch {
+        setInboxItems([]);
         setGmailConnected(false);
+        setGmailError("Could not check Gmail connection status.");
       }
     }
 
     checkGmailStatus();
-  }, [fetchGmailEmails]);
+  }, [fetchGmailEmails, setInboxItems]);
+
+  const statusText = loadingEmails
+    ? "Loading real Gmail messages..."
+    : gmailError
+      ? "Gmail connection needs attention"
+      : gmailConnected
+        ? "Gmail connected - live inbox loaded"
+        : "Connect Gmail to load real emails";
 
   return (
     <Card className="rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -98,20 +126,16 @@ Context: ${summary}
         <SectionHeader
           icon={Mail}
           title="Priority Email Queue"
-          subtitle={
-            gmailConnected
-              ? "Gmail connected - live inbox loaded"
-              : "Connect Gmail to load real emails"
-          }
+          subtitle={statusText}
           action={
             <div className="flex flex-wrap gap-2">
-              {!gmailConnected ? (
+              {!gmailConnected || gmailError ? (
                 <Button
                   onClick={() => (window.location.href = GOOGLE_AUTH_URL)}
                   variant="outline"
                   className="rounded-2xl"
                 >
-                  Connect Gmail
+                  {gmailConnected ? "Reconnect Gmail" : "Connect Gmail"}
                 </Button>
               ) : (
                 <Button
@@ -133,7 +157,27 @@ Context: ${summary}
           }
         />
 
+        {gmailError && (
+          <div className="mb-4 rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-800">
+            {gmailError}
+          </div>
+        )}
+
         <div className="space-y-4">
+          {inboxItems.length === 0 && (
+            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+              <Mail className="mx-auto h-8 w-8 text-slate-400" />
+              <h3 className="mt-3 font-black text-slate-950">
+                No Gmail messages loaded
+              </h3>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+                {gmailConnected
+                  ? "Reload Gmail or reconnect your account to pull live inbox messages."
+                  : "Connect Gmail to replace this empty queue with real emails."}
+              </p>
+            </div>
+          )}
+
           {inboxItems.map((email) => (
             <div
               key={email.id}

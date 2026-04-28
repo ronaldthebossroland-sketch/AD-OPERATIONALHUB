@@ -141,6 +141,7 @@ export default function ADOperationalHub() {
         <Sidebar
           activeView={resolvedActiveView}
           items={visibleNavItems}
+          meetings={meetings}
           setActiveView={setActiveView}
         />
 

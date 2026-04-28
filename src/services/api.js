@@ -20,7 +20,8 @@ export async function getGmailStatus() {
     credentials: "include",
   });
 
-  return res.json();
+  const data = await res.json();
+  return { ok: res.ok, status: res.status, ...data };
 }
 
 export async function getGmailEmails() {
@@ -28,7 +29,8 @@ export async function getGmailEmails() {
     credentials: "include",
   });
 
-  return res.json();
+  const data = await res.json();
+  return { ok: res.ok, status: res.status, ...data };
 }
 
 export async function getCurrentUser() {

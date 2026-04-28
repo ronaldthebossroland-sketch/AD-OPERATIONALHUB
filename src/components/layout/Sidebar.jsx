@@ -2,7 +2,9 @@ import { Clock3, Sparkles } from "lucide-react";
 
 import { Button } from "../ui/button";
 
-export default function Sidebar({ activeView, items, setActiveView }) {
+export default function Sidebar({ activeView, items, meetings, setActiveView }) {
+  const nextMeeting = meetings[0];
+
   return (
     <>
       <aside className="hidden w-72 border-r border-slate-200 bg-white p-5 lg:block">
@@ -44,10 +46,16 @@ export default function Sidebar({ activeView, items, setActiveView }) {
             Next briefing
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            Finance Review starts in 10 minutes. Budget variance and vendor
-            pricing require attention.
+            {nextMeeting
+              ? `${nextMeeting.title} starts at ${nextMeeting.time}. ${nextMeeting.risk}`
+              : "No meeting briefing is queued right now."}
           </p>
-          <Button className="mt-4 w-full rounded-2xl">Open</Button>
+          <Button
+            onClick={() => setActiveView("meetings")}
+            className="mt-4 w-full rounded-2xl"
+          >
+            Open
+          </Button>
         </div>
       </aside>
 

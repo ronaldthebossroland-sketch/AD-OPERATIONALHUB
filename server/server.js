@@ -40,9 +40,9 @@ const openai = new OpenAI({
 
 function createGoogleClient() {
   return new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI
+    process.env.GOOGLE_CLIENT_ID?.trim(),
+    process.env.GOOGLE_CLIENT_SECRET?.trim(),
+    process.env.GOOGLE_REDIRECT_URI?.trim()
   );
 }
 
@@ -89,6 +89,128 @@ function setSessionUser(req, user) {
   };
 }
 
+async function getGoogleProfile(oauth2Client, tokens) {
+  if (tokens.id_token) {
+    const ticket = await oauth2Client.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: process.env.GOOGLE_CLIENT_ID?.trim(),
+    });
+    const payload = ticket.getPayload();
+
+    if (payload?.email) {
+      return {
+        email: payload.email,
+        name: payload.name || payload.email,
+      };
+    }
+  }
+
+  const oauth2 = google.oauth2({
+    auth: oauth2Client,
+    version: "v2",
+  });
+  const profile = await oauth2.userinfo.get();
+
+  return {
+    email: profile.data.email,
+    name: profile.data.name || profile.data.email,
+  };
+}
+
+function findOrCreateGoogleUser(email, name) {
+  const finalEmail = email.trim().toLowerCase();
+  const existingUser = db
+    .prepare("SELECT * FROM users WHERE email = ? AND is_active = 1")
+    .get(finalEmail);
+
+  if (existingUser) {
+    return existingUser;
+  }
+
+  db.prepare(
+    `
+    INSERT INTO users (name, email, role, access, is_active)
+    VALUES (@name, @email, @role, @access, @isActive)
+  `
+  ).run({
+    name: name || finalEmail,
+    email: finalEmail,
+    role: "Viewer",
+    access: "Limited Access",
+    isActive: 1,
+  });
+
+  return db
+    .prepare("SELECT * FROM users WHERE email = ? AND is_active = 1")
+    .get(finalEmail);
+}
+
+function sendGoogleError(res, error) {
+  const detail =
+    error.response?.data?.error_description ||
+    error.response?.data?.error ||
+    error.message ||
+    "Unknown Google OAuth error.";
+
+  res.status(500).send(`
+    <!doctype html>
+    <html>
+      <head>
+        <title>Google connection failed</title>
+        <style>
+          body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            background: #f1f5f9;
+            color: #020617;
+            font-family: Arial, sans-serif;
+          }
+          main {
+            width: min(92vw, 520px);
+            border: 1px solid #e2e8f0;
+            border-radius: 24px;
+            background: white;
+            padding: 28px;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+          }
+          h1 { margin: 0; font-size: 24px; }
+          p { color: #475569; line-height: 1.6; }
+          code {
+            display: block;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            border-radius: 16px;
+            background: #f8fafc;
+            padding: 14px;
+            color: #334155;
+          }
+          a {
+            display: inline-block;
+            margin-top: 18px;
+            border-radius: 16px;
+            background: #020617;
+            padding: 12px 16px;
+            color: white;
+            text-decoration: none;
+            font-weight: 700;
+          }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Google connection failed</h1>
+          <p>Google returned an error while connecting Gmail. Details:</p>
+          <code>${String(detail).replaceAll("<", "&lt;").replaceAll(">", "&gt;")}</code>
+          <p>Go back to the app and try reconnecting Gmail. If this repeats, confirm the Google OAuth redirect URI is exactly <strong>http://localhost:5000/auth/google/callback</strong>.</p>
+          <a href="http://localhost:5173">Return to AD Hub</a>
+        </main>
+      </body>
+    </html>
+  `);
+}
+
 /* =========================
    AUTH HELPERS
 ========================= */
@@ -119,6 +241,7 @@ app.get("/auth/google", (req, res) => {
 
     const url = oauth2Client.generateAuthUrl({
       access_type: "offline",
+      include_granted_scopes: true,
       prompt: "consent",
       scope: [
         "https://www.googleapis.com/auth/gmail.readonly",
@@ -136,7 +259,11 @@ app.get("/auth/google", (req, res) => {
 
 app.get("/auth/google/callback", async (req, res) => {
   try {
-    const { code } = req.query;
+    const { code, error, error_description: errorDescription } = req.query;
+
+    if (error) {
+      throw new Error(errorDescription || error);
+    }
 
     if (!code) {
       return res.send("No Google authorization code received.");
@@ -147,41 +274,16 @@ app.get("/auth/google/callback", async (req, res) => {
 
     oauth2Client.setCredentials(tokens);
 
-    const oauth2 = google.oauth2({
-      auth: oauth2Client,
-      version: "v2",
-    });
-
-    const profile = await oauth2.userinfo.get();
-
-    const email = profile.data.email;
-    const name = profile.data.name || "User";
-
-    const user = db
-      .prepare("SELECT * FROM users WHERE email = ? AND is_active = 1")
-      .get(email);
-
-    if (!user) {
-      return res.send(`
-        <h2>Access Denied</h2>
-        <p>Your email is not authorized to access AD Operational Hub.</p>
-        <p>Email: ${email}</p>
-      `);
-    }
+    const profile = await getGoogleProfile(oauth2Client, tokens);
+    const user = findOrCreateGoogleUser(profile.email, profile.name);
 
     req.session.tokens = tokens;
-    req.session.user = {
-      id: user.id,
-      name: user.name || name,
-      email: user.email,
-      role: user.role,
-      access: user.access,
-    };
+    setSessionUser(req, user);
 
     res.redirect("http://localhost:5173");
   } catch (error) {
     console.error("Google callback error:", error);
-    res.send("Google connection failed. Check server terminal.");
+    sendGoogleError(res, error);
   }
 });
 
@@ -378,7 +480,7 @@ ${message}
 
 app.get("/api/gmail/status", (req, res) => {
   res.json({
-    connected: Boolean(req.session.tokens),
+    connected: Boolean(req.session.user && req.session.tokens),
     user: req.session.user || null,
   });
 });
@@ -440,8 +542,18 @@ app.get("/api/gmail/emails", requireLogin, async (req, res) => {
     res.json({ emails });
   } catch (error) {
     console.error("Gmail fetch error:", error);
+    const status = error.response?.status || error.code;
+
+    if (status === 401 || status === 403) {
+      delete req.session.tokens;
+
+      return res.status(401).json({
+        error: "Gmail access expired. Please reconnect Gmail.",
+      });
+    }
+
     res.status(500).json({
-      error: "Could not fetch Gmail emails.",
+      error: "Could not fetch Gmail emails. Check the Gmail connection.",
     });
   }
 });

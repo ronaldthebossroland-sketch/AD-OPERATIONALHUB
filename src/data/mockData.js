@@ -62,14 +62,6 @@ export const initialAlerts = [
     severity: "High",
     icon: Building2,
   },
-  {
-    id: 3,
-    type: "Email",
-    title: "7 emails require executive response",
-    detail: "Finance, partnership, and HR threads need attention.",
-    severity: "Medium",
-    icon: Mail,
-  },
 ];
 
 export const projects = [
@@ -137,35 +129,7 @@ export const churchActivities = [
   },
 ];
 
-export const initialInboxItems = [
-  {
-    id: 1,
-    from: "Finance Team",
-    subject: "Approval needed for revised logistics budget",
-    urgency: "High",
-    summary:
-      "Finance requires approval on updated logistics line items before outreach procurement proceeds.",
-    draft: "",
-  },
-  {
-    id: 2,
-    from: "Partnership Office",
-    subject: "Follow-up list for top partners",
-    urgency: "Medium",
-    summary:
-      "Three key partners need appreciation messages before next week's engagement meetings.",
-    draft: "",
-  },
-  {
-    id: 3,
-    from: "Facility Manager",
-    subject: "Repair quote for generator room",
-    urgency: "High",
-    summary:
-      "Facility team submitted repair quote and recommends urgent approval to avoid disruption.",
-    draft: "",
-  },
-];
+export const initialInboxItems = [];
 
 export const navItems = [
   { key: "settings", label: "Settings", icon: Settings, adminOnly: true },
