@@ -1,0 +1,18 @@
+{
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@deepgram/sdk": "latest",
+    "@google/genai": "latest",
+    "@supabase/supabase-js": "latest",
+    "cors": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "express-session": "latest",
+    "googleapis": "latest",
+    "openai": "latest",
+    "ws": "latest"
+  }
+}
