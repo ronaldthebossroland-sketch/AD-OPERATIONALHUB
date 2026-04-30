@@ -24,7 +24,6 @@ export const API_BASE_URL = getApiBaseUrl();
 export const APP_HOME_URL = trimTrailingSlash(
   import.meta.env.VITE_APP_HOME_URL || getBrowserOrigin()
 );
-export const GOOGLE_AUTH_URL = `${API_BASE_URL}/auth/google`;
 export const TRANSCRIPTION_WS_URL = (() => {
   const configuredUrl = import.meta.env.VITE_TRANSCRIPTION_WS_URL;
 
@@ -192,6 +191,13 @@ export function signupUser(account) {
   return requestJson("/api/auth/signup", {
     method: "POST",
     body: JSON.stringify(account),
+  });
+}
+
+export function loginWithSupabaseToken(accessToken) {
+  return requestJson("/api/auth/supabase", {
+    method: "POST",
+    body: JSON.stringify({ accessToken }),
   });
 }
 

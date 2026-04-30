@@ -12,11 +12,11 @@ import kingsChatWebSdk from "kingschat-web-sdk";
 import "kingschat-web-sdk/dist/stylesheets/style.min.css";
 
 import {
-  GOOGLE_AUTH_URL,
   loginUser,
   loginWithKingsChat,
   signupUser,
 } from "../../services/api";
+import { signInWithGoogle } from "../../services/oauth";
 import { Button } from "../ui/button";
 
 const emptyAuthForm = {
@@ -31,6 +31,7 @@ export default function LoginPage({ onLogin }) {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [isKingsChatLoading, setIsKingsChatLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [kingsChatError, setKingsChatError] = useState("");
   const [kingsChatStatus, setKingsChatStatus] = useState("");
   const kingsChatClientId = import.meta.env.VITE_KINGSCHAT_CLIENT_ID;
@@ -110,6 +111,19 @@ export default function LoginPage({ onLogin }) {
       setKingsChatError(error.message || "KingsChat login was cancelled.");
     } finally {
       setIsKingsChatLoading(false);
+    }
+  }
+
+  async function handleGoogleLogin() {
+    setAuthError("");
+
+    try {
+      setIsGoogleLoading(true);
+      await signInWithGoogle();
+    } catch (error) {
+      setAuthError(error.message || "Could not start Google sign-in.");
+    } finally {
+      setIsGoogleLoading(false);
     }
   }
 
@@ -239,12 +253,17 @@ export default function LoginPage({ onLogin }) {
         </div>
 
         <Button
-          onClick={() => (window.location.href = GOOGLE_AUTH_URL)}
+          onClick={handleGoogleLogin}
+          disabled={isGoogleLoading}
           variant="outline"
           className="w-full rounded-2xl bg-white py-3"
         >
-          <Mail className="mr-2 h-4 w-4" />
-          Continue with Google
+          {isGoogleLoading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Mail className="mr-2 h-4 w-4" />
+          )}
+          {isGoogleLoading ? "Opening Google..." : "Continue with Google"}
         </Button>
 
         <Button

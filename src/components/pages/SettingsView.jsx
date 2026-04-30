@@ -10,18 +10,17 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import {
-  APP_HOME_URL,
   createUser,
   deleteUser,
   getCurrentUser,
   getUsers,
-  GOOGLE_AUTH_URL,
   logoutUser,
 } from "../../services/api";
+import { signInWithGoogle } from "../../services/oauth";
 import { Card, CardContent } from "../ui/card";
 import { Button } from "../ui/button";
 
-export default function SettingsView({ currentUser: currentUserFromApp }) {
+export default function SettingsView({ currentUser: currentUserFromApp, onLogout }) {
   const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(currentUserFromApp || null);
   const [newUserEmail, setNewUserEmail] = useState("");
@@ -102,8 +101,12 @@ export default function SettingsView({ currentUser: currentUserFromApp }) {
   }
 
   async function logout() {
+    if (onLogout) {
+      await onLogout();
+      return;
+    }
+
     await logoutUser();
-    window.location.href = APP_HOME_URL;
   }
 
   useEffect(() => {
@@ -319,7 +322,7 @@ export default function SettingsView({ currentUser: currentUserFromApp }) {
                 </div>
 
                 <Button
-                  onClick={() => (window.location.href = GOOGLE_AUTH_URL)}
+                  onClick={signInWithGoogle}
                   className="w-full rounded-2xl"
                 >
                   Login with Google

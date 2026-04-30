@@ -272,6 +272,7 @@ async function getOrCreateGoogleUser(email, name) {
       email: finalEmail,
       role: "Viewer",
       access: "Limited Access",
+      auth_provider: "google",
       is_active: true,
     })
     .select(APP_USER_COLUMNS)
@@ -902,6 +903,67 @@ app.get("/api/auth/me", async (req, res) => {
   } catch (error) {
     console.error("Current user error:", error);
     res.status(500).json({ error: "Could not verify session." });
+  }
+});
+
+app.post("/api/auth/supabase", async (req, res) => {
+  try {
+    const accessToken = cleanText(req.body.accessToken);
+
+    if (!accessToken) {
+      return res.status(400).json({ error: "Supabase access token is required." });
+    }
+
+    const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
+
+    if (error) {
+      throw error;
+    }
+
+    const supabaseUser = data.user;
+    const email = normalizeEmail(supabaseUser?.email);
+
+    if (!email) {
+      return res.status(401).json({ error: "Google profile email is required." });
+    }
+
+    const provider =
+      supabaseUser.app_metadata?.provider ||
+      supabaseUser.app_metadata?.providers?.[0];
+
+    if (provider && provider !== "google") {
+      return res.status(403).json({ error: "Use Google to sign in." });
+    }
+
+    const name =
+      cleanText(supabaseUser.user_metadata?.full_name) ||
+      cleanText(supabaseUser.user_metadata?.name) ||
+      email;
+
+    const { user, error: userError, inactive } = await getOrCreateGoogleUser(
+      email,
+      name
+    );
+
+    if (userError) {
+      throw userError;
+    }
+
+    if (!user) {
+      return res.status(403).json({
+        error: inactive
+          ? "This Google account has been deactivated for AD Operational Hub."
+          : "This Google account could not be authorized for AD Operational Hub.",
+      });
+    }
+
+    delete req.session.tokens;
+    setSessionUser(req, user);
+
+    res.json({ success: true, user: req.session.user });
+  } catch (error) {
+    console.error("Supabase auth bridge error:", error);
+    res.status(401).json({ error: "Could not verify Google sign-in." });
   }
 });
 

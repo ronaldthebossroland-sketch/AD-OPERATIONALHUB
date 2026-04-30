@@ -7,9 +7,9 @@ import {
   getEmailDrafts,
   getGmailEmails,
   getGmailStatus,
-  GOOGLE_AUTH_URL,
   sendGmailMessage,
 } from "../../services/api";
+import { connectGmailWithGoogle } from "../../services/oauth";
 import SectionHeader from "../shared/SectionHeader";
 import StatusPill from "../shared/StatusPill";
 import { Button } from "../ui/button";
@@ -248,7 +248,7 @@ Return only the email body. Do not send it.
             <div className="flex flex-wrap gap-2">
               {!gmailConnected || gmailError ? (
                 <Button
-                  onClick={() => (window.location.href = GOOGLE_AUTH_URL)}
+                  onClick={connectGmailWithGoogle}
                   variant="outline"
                   className="rounded-2xl"
                 >

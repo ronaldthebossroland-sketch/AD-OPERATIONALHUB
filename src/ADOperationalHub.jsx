@@ -31,6 +31,7 @@ import {
   updateAlert,
   updateOperation,
 } from "./services/api";
+import { syncSupabaseAuthSession } from "./services/oauth";
 
 const viewAccess = {
   dashboard: ["Super Admin", "Admin", "Viewer"],
@@ -109,6 +110,21 @@ export default function ADOperationalHub() {
 
     async function loadSession() {
       try {
+        let syncedUser = null;
+
+        try {
+          syncedUser = await syncSupabaseAuthSession();
+        } catch (error) {
+          console.warn("Could not sync Supabase auth session:", error);
+        }
+
+        if (syncedUser) {
+          if (isMounted) {
+            setCurrentUser(syncedUser);
+          }
+          return;
+        }
+
         const data = await getCurrentUser();
 
         if (isMounted) {
@@ -364,7 +380,7 @@ export default function ADOperationalHub() {
 
     switch (activeView) {
       case "settings":
-        return <SettingsView currentUser={currentUser} />;
+        return <SettingsView currentUser={currentUser} onLogout={handleLogout} />;
       case "calendar":
         return (
           <CalendarView
