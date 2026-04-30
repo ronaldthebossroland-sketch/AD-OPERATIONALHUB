@@ -67,6 +67,21 @@ app.use((error, _req, res, next) => {
   return next(error);
 });
 
+function healthStatus() {
+  return {
+    status: "ok",
+    message: "AD Operational Hub API is running",
+  };
+}
+
+app.get("/", (_req, res) => {
+  res.json(healthStatus());
+});
+
+app.get("/api/health", (_req, res) => {
+  res.json(healthStatus());
+});
+
 const SESSION_SECRET = process.env.SESSION_SECRET?.trim();
 const SESSION_COOKIE_SECURE =
   process.env.SESSION_COOKIE_SECURE === "true" ||
