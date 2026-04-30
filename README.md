@@ -1,16 +1,76 @@
-# React + Vite
+# AD Operational Hub
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+AD Operational Hub is a Vite React frontend with an Express/Supabase backend.
 
-Currently, two official plugins are available:
+## Web Deployment
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Vercel frontend:
 
-## React Compiler
+- Root Directory: `./`
+- Framework: `Vite`
+- Install Command: `npm install`
+- Build Command: `npm run build`
+- Output Directory: `dist`
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Render backend:
 
-## Expanding the ESLint configuration
+- Root Directory: `server`
+- Build Command: `npm install`
+- Start Command: `node server.js`
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Android APK With Capacitor
+
+The Android wrapper uses Capacitor and keeps the existing web deployment intact.
+
+Capacitor app settings:
+
+- App name: `AD Operational Hub`
+- App ID: `com.adoperationalhub.app`
+- Web directory: `dist`
+- Live URL: `https://ad-operationalhub-seven.vercel.app`
+- Backend API URL for production web builds: `https://ad-operationalhub.onrender.com`
+
+No backend API keys or service role secrets belong in the Android or React app.
+
+## Rebuild Android App
+
+From the repo root:
+
+```bash
+npm install
+npm run build
+npx cap sync android
+```
+
+## Open Android Studio
+
+```bash
+npx cap open android
+```
+
+If Capacitor cannot find Android Studio, install Android Studio and set:
+
+```powershell
+$env:CAPACITOR_ANDROID_STUDIO_PATH="C:\Path\To\studio64.exe"
+```
+
+Then run:
+
+```bash
+npx cap open android
+```
+
+## Generate Debug APK
+
+After Android Studio and the Android SDK are installed:
+
+```bash
+cd android
+.\gradlew assembleDebug
+```
+
+The debug APK will be generated at:
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
