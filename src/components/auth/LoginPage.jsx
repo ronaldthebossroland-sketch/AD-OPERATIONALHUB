@@ -1,39 +1,121 @@
+import {
+  Loader2,
+  Lock,
+  Mail,
+  MessageCircle,
+  ShieldCheck,
+  Sparkles,
+  UserPlus,
+} from "lucide-react";
 import { useState } from "react";
-import { LockKeyhole, Mail, Sparkles } from "lucide-react";
+import kingsChatWebSdk from "kingschat-web-sdk";
+import "kingschat-web-sdk/dist/stylesheets/style.min.css";
 
-import { GOOGLE_AUTH_URL, loginUser } from "../../services/api";
+import {
+  GOOGLE_AUTH_URL,
+  loginUser,
+  loginWithKingsChat,
+  signupUser,
+} from "../../services/api";
 import { Button } from "../ui/button";
 
-export default function LoginPage({ onLogin, onShowSignup }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+const emptyAuthForm = {
+  name: "",
+  email: "",
+  password: "",
+};
 
-  async function handleSubmit(event) {
+export default function LoginPage({ onLogin }) {
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState(emptyAuthForm);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [isKingsChatLoading, setIsKingsChatLoading] = useState(false);
+  const [kingsChatError, setKingsChatError] = useState("");
+  const [kingsChatStatus, setKingsChatStatus] = useState("");
+  const kingsChatClientId = import.meta.env.VITE_KINGSCHAT_CLIENT_ID;
+  const isKingsChatConfigured = Boolean(kingsChatClientId);
+  const isCreatingAccount = authMode === "signup";
+
+  function updateAuthForm(field, value) {
+    setAuthForm((previous) => ({ ...previous, [field]: value }));
+  }
+
+  async function handlePasswordAuth(event) {
     event.preventDefault();
-    setMessage("");
-    setLoading(true);
+    setAuthError("");
+
+    if (!authForm.email.trim() || !authForm.password) {
+      setAuthError("Email and password are required.");
+      return;
+    }
+
+    if (isCreatingAccount && authForm.password.length < 8) {
+      setAuthError("Password must be at least 8 characters.");
+      return;
+    }
 
     try {
-      const data = await loginUser({ email, password });
+      setAuthLoading(true);
+      const data = isCreatingAccount
+        ? await signupUser(authForm)
+        : await loginUser(authForm);
 
       if (!data.ok) {
-        setMessage(data.error || "Could not log in.");
+        setAuthError(data.error || "Could not complete sign in.");
         return;
       }
 
-      onLogin(data.user);
+      onLogin?.(data.user);
+      setAuthForm(emptyAuthForm);
     } catch {
-      setMessage("Could not connect to the login server.");
+      setAuthError("Could not reach the login server.");
     } finally {
-      setLoading(false);
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleKingsChatLogin() {
+    setKingsChatError("");
+    setKingsChatStatus("");
+
+    if (!isKingsChatConfigured) {
+      setKingsChatStatus("KingsChat login is waiting for API approval.");
+      return;
+    }
+
+    try {
+      setIsKingsChatLoading(true);
+
+      const authTokens = await kingsChatWebSdk.login({
+        clientId: kingsChatClientId,
+        scopes: [],
+      });
+
+      const data = await loginWithKingsChat({
+        accessToken: authTokens.accessToken,
+        refreshToken: authTokens.refreshToken,
+        expiresInMillis: authTokens.expiresInMillis,
+      });
+
+      if (!data.ok) {
+        setKingsChatError(data.error || "Could not complete KingsChat login.");
+        return;
+      }
+
+      setKingsChatStatus(
+        "KingsChat connected. Google access control is still required for now."
+      );
+    } catch (error) {
+      setKingsChatError(error.message || "KingsChat login was cancelled.");
+    } finally {
+      setIsKingsChatLoading(false);
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-3 text-slate-950 sm:p-4">
-      <div className="w-full max-w-[26rem] rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4 text-slate-950">
+      <div className="w-full max-w-[28rem] rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
         <div className="flex items-center gap-3">
           <div className="shrink-0 rounded-2xl bg-slate-950 p-3 text-white">
             <Sparkles className="h-5 w-5 sm:h-6 sm:w-6" />
@@ -42,70 +124,164 @@ export default function LoginPage({ onLogin, onShowSignup }) {
             <h1 className="break-words text-lg font-black sm:text-xl">
               AD Operational Hub
             </h1>
-            <p className="text-sm text-slate-500">Sign in to continue</p>
+            <p className="text-sm text-slate-500">
+              Operational AI Assistant
+            </p>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-8 space-y-4">
-          <div>
-            <label className="text-sm font-bold text-slate-700">Email</label>
-            <div className="relative mt-2">
-              <Mail className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                type="email"
-                autoComplete="email"
-                placeholder="you@example.com"
-                className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none transition focus:border-slate-400"
-              />
+        <div className="mt-8 rounded-3xl bg-slate-50 p-5">
+          <div className="flex items-center gap-3">
+            <div className="rounded-2xl bg-white p-3 text-slate-700 shadow-sm">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-slate-950">
+                Welcome back
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Choose a secure sign-in method to continue to your command
+                center.
+              </p>
             </div>
           </div>
+        </div>
 
-          <div>
-            <label className="text-sm font-bold text-slate-700">
-              Password
-            </label>
-            <div className="relative mt-2">
-              <LockKeyhole className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                type="password"
-                autoComplete="current-password"
-                placeholder="Enter your password"
-                className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none transition focus:border-slate-400"
-              />
-            </div>
+        <form onSubmit={handlePasswordAuth} className="mt-5 space-y-3">
+          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("login");
+                setAuthError("");
+              }}
+              className={`rounded-xl px-3 py-2 text-sm font-black transition ${
+                authMode === "login"
+                  ? "bg-white text-slate-950 shadow-sm"
+                  : "text-slate-500"
+              }`}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("signup");
+                setAuthError("");
+              }}
+              className={`rounded-xl px-3 py-2 text-sm font-black transition ${
+                authMode === "signup"
+                  ? "bg-white text-slate-950 shadow-sm"
+                  : "text-slate-500"
+              }`}
+            >
+              Create account
+            </button>
           </div>
 
-          {message && (
-            <div className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-800">
-              {message}
-            </div>
+          {isCreatingAccount && (
+            <input
+              value={authForm.name}
+              onChange={(event) => updateAuthForm("name", event.target.value)}
+              placeholder="Name"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
+            />
           )}
 
-          <Button disabled={loading} className="w-full rounded-2xl py-3">
-            {loading ? "Signing in..." : "Sign In"}
+          <input
+            value={authForm.email}
+            onChange={(event) => updateAuthForm("email", event.target.value)}
+            placeholder="Email"
+            type="email"
+            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
+          />
+
+          <input
+            value={authForm.password}
+            onChange={(event) => updateAuthForm("password", event.target.value)}
+            placeholder="Password"
+            type="password"
+            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
+          />
+
+          <Button
+            type="submit"
+            disabled={authLoading}
+            className="w-full rounded-2xl py-3"
+          >
+            {authLoading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : isCreatingAccount ? (
+              <UserPlus className="mr-2 h-4 w-4" />
+            ) : (
+              <Lock className="mr-2 h-4 w-4" />
+            )}
+            {authLoading
+              ? "Working..."
+              : isCreatingAccount
+                ? "Create Account"
+                : "Sign In"}
           </Button>
         </form>
 
-        <div className="mt-4 grid gap-3">
-          <Button
-            onClick={() => (window.location.href = GOOGLE_AUTH_URL)}
-            variant="outline"
-            className="w-full rounded-2xl bg-white py-3"
-          >
-            Continue with Google
-          </Button>
+        {authError ? (
+          <p className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {authError}
+          </p>
+        ) : null}
 
-          <button
-            onClick={onShowSignup}
-            className="rounded-2xl px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
-          >
-            Create a new account
-          </button>
+        <div className="my-5 flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-200" />
+          <span className="text-xs font-black uppercase text-slate-400">
+            or
+          </span>
+          <div className="h-px flex-1 bg-slate-200" />
         </div>
+
+        <Button
+          onClick={() => (window.location.href = GOOGLE_AUTH_URL)}
+          variant="outline"
+          className="w-full rounded-2xl bg-white py-3"
+        >
+          <Mail className="mr-2 h-4 w-4" />
+          Continue with Google
+        </Button>
+
+        <Button
+          onClick={handleKingsChatLogin}
+          disabled={!isKingsChatConfigured || isKingsChatLoading}
+          variant="outline"
+          className="mt-3 w-full rounded-2xl py-3"
+        >
+          {isKingsChatLoading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <MessageCircle className="mr-2 h-4 w-4" />
+          )}
+          {isKingsChatLoading
+            ? "Connecting KingsChat..."
+            : isKingsChatConfigured
+              ? "Continue with KingsChat"
+              : "KingsChat coming soon"}
+        </Button>
+
+        {!isKingsChatConfigured ? (
+          <p className="mt-3 text-center text-xs font-bold text-slate-500">
+            KingsChat access is pending API approval.
+          </p>
+        ) : null}
+
+        {kingsChatError ? (
+          <p className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {kingsChatError}
+          </p>
+        ) : null}
+
+        {kingsChatStatus ? (
+          <p className="mt-3 rounded-2xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+            {kingsChatStatus}
+          </p>
+        ) : null}
       </div>
     </div>
   );

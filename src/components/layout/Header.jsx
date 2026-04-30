@@ -2,24 +2,38 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
+  Building2,
   CalendarDays,
+  Clock3,
   ClipboardList,
   LogOut,
   Mail,
   Plus,
   Search,
   Sparkles,
+  Users,
 } from "lucide-react";
 
+import NotificationBell from "../shared/NotificationBell";
 import { Button } from "../ui/button";
 
 export default function Header({
   activeLabel,
   alerts,
   canManageAccess,
+  canManageOperations,
   currentUser,
   inboxItems,
   meetings,
+  reminders = [],
+  operations = [],
+  partners = [],
+  projects = [],
+  onAlarmMarkDone,
+  onAlarmOpenRelated,
+  onAlarmReschedule,
+  onAlarmSnooze,
+  onAlarmTrigger,
   onLogout,
   onNavigate,
   onSettingsClick,
@@ -29,6 +43,9 @@ export default function Header({
 
   const focusItems = useMemo(() => {
     const nextMeeting = meetings[0];
+    const nextReminder = reminders.find(
+      (reminder) => reminder.status !== "Completed"
+    ) || reminders[0];
     const highAlerts = alerts.filter((alert) => alert.severity === "High");
     const priorityEmail =
       inboxItems.find((item) => item.urgency === "High") || inboxItems[0];
@@ -40,6 +57,13 @@ export default function Header({
         value: nextMeeting ? nextMeeting.time : "Clear",
         detail: nextMeeting ? nextMeeting.title : "No meeting queued",
         view: "meetings",
+      },
+      {
+        icon: Clock3,
+        label: "Next reminder",
+        value: nextReminder ? nextReminder.reminder_time : "Clear",
+        detail: nextReminder ? nextReminder.title : "No reminder queued",
+        view: "dashboard",
       },
       {
         icon: AlertTriangle,
@@ -57,7 +81,70 @@ export default function Header({
         view: "emails",
       },
     ];
-  }, [alerts, inboxItems, meetings]);
+  }, [alerts, inboxItems, meetings, reminders]);
+
+  const searchResults = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    if (!normalizedQuery) {
+      return [];
+    }
+
+    const records = [
+      ...meetings.map((meeting) => ({
+        icon: CalendarDays,
+        title: meeting.title,
+        detail: [meeting.time, meeting.location].filter(Boolean).join(" - "),
+        view: "meetings",
+      })),
+      ...alerts.map((alert) => ({
+        icon: AlertTriangle,
+        title: alert.title,
+        detail: alert.detail,
+        view: "operations",
+      })),
+      ...reminders.map((reminder) => ({
+        icon: Clock3,
+        title: reminder.title,
+        detail: [reminder.reminder_time, reminder.notes]
+          .filter(Boolean)
+          .join(" - "),
+        view: "dashboard",
+      })),
+      ...inboxItems.map((email) => ({
+        icon: Mail,
+        title: email.subject,
+        detail: email.from,
+        view: "emails",
+      })),
+      ...projects.map((project) => ({
+        icon: ClipboardList,
+        title: project.name,
+        detail: project.lead || project.status,
+        view: "projects",
+      })),
+      ...partners.map((partner) => ({
+        icon: Users,
+        title: partner.name,
+        detail: partner.email || partner.phone,
+        view: "partners",
+      })),
+      ...operations.map((operation) => ({
+        icon: Building2,
+        title: operation.title,
+        detail: `${operation.area} ${operation.detail || ""}`,
+        view: "operations",
+      })),
+    ];
+
+    return records
+      .filter((record) =>
+        `${record.title || ""} ${record.detail || ""}`
+          .toLowerCase()
+          .includes(normalizedQuery)
+      )
+      .slice(0, 8);
+  }, [alerts, inboxItems, meetings, operations, partners, projects, query, reminders]);
 
   function openView(view) {
     onNavigate(view);
@@ -90,6 +177,44 @@ export default function Header({
             placeholder="Search meetings, partners, tasks..."
             className="w-full min-w-0 rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none transition focus:border-slate-400 sm:w-80"
           />
+          {query.trim() && (
+            <div className="absolute left-0 right-0 top-full z-50 mt-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
+              {searchResults.length === 0 ? (
+                <p className="px-3 py-2 text-sm font-bold text-slate-500">
+                  No live records found.
+                </p>
+              ) : (
+                <div className="grid gap-2">
+                  {searchResults.map((result, index) => {
+                    const Icon = result.icon;
+
+                    return (
+                      <button
+                        key={`${result.view}-${result.title}-${index}`}
+                        onClick={() => {
+                          openView(result.view);
+                          setQuery("");
+                        }}
+                        className="flex min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-slate-50"
+                      >
+                        <div className="rounded-2xl bg-slate-100 p-2">
+                          <Icon className="h-4 w-4 text-slate-700" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-black text-slate-950">
+                            {result.title}
+                          </p>
+                          <p className="truncate text-xs text-slate-500">
+                            {result.detail || result.view}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <Button
@@ -101,12 +226,35 @@ export default function Header({
           <span className="truncate">Focus Brief</span>
         </Button>
 
+        <NotificationBell
+          alerts={alerts}
+          meetings={meetings}
+          reminders={reminders}
+          operations={operations}
+          onMarkDone={onAlarmMarkDone}
+          onOpenRelated={onAlarmOpenRelated}
+          onReschedule={onAlarmReschedule}
+          onSnooze={onAlarmSnooze}
+          onTrigger={onAlarmTrigger}
+        />
+
+        {canManageOperations && (
+          <Button
+            onClick={() => openView("meetings")}
+            className="min-w-0 rounded-2xl px-3 py-3 text-xs sm:text-sm"
+          >
+            <Plus className="mr-2 h-4 w-4 shrink-0" />
+            <span className="truncate">New Meeting</span>
+          </Button>
+        )}
+
         <Button
-          onClick={() => openView("meetings")}
-          className="min-w-0 rounded-2xl px-3 py-3 text-xs sm:text-sm"
+          onClick={onLogout}
+          variant="outline"
+          className="min-w-0 rounded-2xl bg-white px-3 py-3 text-xs text-red-600 sm:text-sm"
         >
-          <Plus className="mr-2 h-4 w-4 shrink-0" />
-          <span className="truncate">New Meeting</span>
+          <LogOut className="mr-2 h-4 w-4 shrink-0" />
+          <span className="truncate">Sign Out</span>
         </Button>
 
         {briefOpen && (

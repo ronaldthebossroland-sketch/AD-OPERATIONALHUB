@@ -7,6 +7,7 @@ import {
   Brain,
   Trash2,
   RefreshCw,
+  ShieldAlert,
 } from "lucide-react";
 import {
   APP_HOME_URL,
@@ -20,9 +21,9 @@ import {
 import { Card, CardContent } from "../ui/card";
 import { Button } from "../ui/button";
 
-export default function SettingsView() {
+export default function SettingsView({ currentUser: currentUserFromApp }) {
   const [users, setUsers] = useState([]);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(currentUserFromApp || null);
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserName, setNewUserName] = useState("");
   const [newUserRole, setNewUserRole] = useState("Viewer");
@@ -36,7 +37,7 @@ export default function SettingsView() {
       const data = await getUsers();
 
       if (data.users) {
-        setUsers(data.users.filter((user) => user.is_active === 1));
+        setUsers(data.users.filter((user) => user.is_active === true));
       } else {
         setMessage(data.error || "Could not load users.");
       }
@@ -113,7 +114,7 @@ export default function SettingsView() {
         const currentUserData = await getCurrentUser();
 
         if (isMounted) {
-          setCurrentUser(currentUserData.user);
+          setCurrentUser(currentUserData.user || currentUserFromApp || null);
         }
       } catch {
         if (isMounted) {
@@ -129,7 +130,7 @@ export default function SettingsView() {
         }
 
         if (usersData.users) {
-          setUsers(usersData.users.filter((user) => user.is_active === 1));
+          setUsers(usersData.users.filter((user) => user.is_active === true));
         } else {
           setMessage(usersData.error || "Could not load users.");
         }
@@ -145,7 +146,25 @@ export default function SettingsView() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [currentUserFromApp]);
+
+  if (currentUser?.role !== "Super Admin") {
+    return (
+      <Card className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <CardContent className="p-8 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
+          <h2 className="mt-4 text-xl font-black text-slate-950">
+            Access Restricted
+          </h2>
+          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-500">
+            Only Super Admin users can manage account access.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="grid gap-6 xl:grid-cols-12">

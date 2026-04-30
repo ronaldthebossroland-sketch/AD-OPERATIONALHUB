@@ -1,9 +1,42 @@
-import { Clock3, Sparkles } from "lucide-react";
+import { Clock3, LogOut, Sparkles } from "lucide-react";
 
 import { Button } from "../ui/button";
 
-export default function Sidebar({ activeView, items, meetings, setActiveView }) {
+function getNextBriefingText(meeting, reminder) {
+  if (!meeting && !reminder) {
+    return "No meeting briefing is queued right now.";
+  }
+
+  if (!meeting && reminder) {
+    return `${reminder.title || "Reminder"} is set for ${
+      reminder.reminder_time || "the next operating window"
+    }.`;
+  }
+
+  const time = String(meeting.time || "").trim();
+  const risk = String(meeting.risk || "").trim();
+  const timeText = time
+    ? /^(today|tomorrow|on|at)\b/i.test(time)
+      ? `starts ${time}`
+      : `starts at ${time}`
+    : "is queued";
+
+  return `${meeting.title} ${timeText}.${risk ? ` ${risk}` : ""}`;
+}
+
+export default function Sidebar({
+  activeView,
+  currentUser,
+  items,
+  meetings,
+  reminders = [],
+  onLogout,
+  setActiveView,
+}) {
   const nextMeeting = meetings[0];
+  const nextReminder =
+    reminders.find((reminder) => reminder.status !== "Completed") ||
+    reminders[0];
 
   return (
     <>
@@ -46,15 +79,30 @@ export default function Sidebar({ activeView, items, meetings, setActiveView }) 
             Next briefing
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            {nextMeeting
-              ? `${nextMeeting.title} starts at ${nextMeeting.time}. ${nextMeeting.risk}`
-              : "No meeting briefing is queued right now."}
+            {getNextBriefingText(nextMeeting, nextReminder)}
           </p>
           <Button
             onClick={() => setActiveView("meetings")}
             className="mt-4 w-full rounded-2xl"
           >
             Open
+          </Button>
+        </div>
+
+        <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4">
+          <p className="truncate text-sm font-black text-slate-950">
+            {currentUser?.name || "Signed in"}
+          </p>
+          <p className="mt-1 truncate text-xs text-slate-500">
+            {currentUser?.email || currentUser?.role}
+          </p>
+          <Button
+            onClick={onLogout}
+            variant="outline"
+            className="mt-3 w-full rounded-2xl text-red-600"
+          >
+            <LogOut className="mr-2 h-4 w-4" />
+            Sign Out
           </Button>
         </div>
       </aside>
