@@ -31,7 +31,10 @@ import {
   updateAlert,
   updateOperation,
 } from "./services/api";
-import { syncSupabaseAuthSession } from "./services/oauth";
+import {
+  registerOAuthDeepLinkHandler,
+  syncSupabaseAuthSession,
+} from "./services/oauth";
 
 const viewAccess = {
   dashboard: ["Super Admin", "Admin", "Viewer"],
@@ -107,6 +110,25 @@ export default function ADOperationalHub() {
 
   useEffect(() => {
     let isMounted = true;
+    let removeOAuthDeepLinkHandler = () => {};
+
+    registerOAuthDeepLinkHandler((user) => {
+      if (isMounted) {
+        setCurrentUser(user);
+        setActiveView("dashboard");
+      }
+    })
+      .then((removeHandler) => {
+        if (!isMounted) {
+          removeHandler();
+          return;
+        }
+
+        removeOAuthDeepLinkHandler = removeHandler;
+      })
+      .catch((error) => {
+        console.warn("Could not register OAuth deep link handler:", error);
+      });
 
     async function loadSession() {
       try {
@@ -121,6 +143,7 @@ export default function ADOperationalHub() {
         if (syncedUser) {
           if (isMounted) {
             setCurrentUser(syncedUser);
+            setActiveView("dashboard");
           }
           return;
         }
@@ -145,6 +168,7 @@ export default function ADOperationalHub() {
 
     return () => {
       isMounted = false;
+      removeOAuthDeepLinkHandler();
     };
   }, []);
 
