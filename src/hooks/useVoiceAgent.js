@@ -134,6 +134,261 @@ function hasDateOrTime(text) {
   );
 }
 
+const spokenHourValues = {
+  one: "1",
+  two: "2",
+  three: "3",
+  four: "4",
+  five: "5",
+  six: "6",
+  seven: "7",
+  eight: "8",
+  nine: "9",
+  ten: "10",
+  eleven: "11",
+  twelve: "12",
+};
+
+const weekdayPattern =
+  "sun(?:day)?|mon(?:day)?|tue(?:s|sday|day)?|wed(?:nesday)?|thu(?:r|rs|rsday|rday|day)?|fri(?:day)?|sat(?:urday)?";
+
+function extractRelativeTimePhrase(text) {
+  const match = cleanVoiceText(text).match(
+    /\b(in\s+(?:a|an|one|\d+)\s+(?:minute|minutes|min|mins|hour|hours|hr|hrs|day|days))\b/i
+  );
+
+  return match ? match[1].replace(/\s+/g, " ").toLowerCase() : "";
+}
+
+function extractDayPhrase(text) {
+  const value = cleanVoiceText(text).replace(/\s+/g, " ").trim();
+
+  if (!value) {
+    return "";
+  }
+
+  const relativeDayMatch = value.match(
+    /\b(day after tomorrow|tomorrow|today|tonight|next week)\b/i
+  );
+
+  if (relativeDayMatch) {
+    return relativeDayMatch[1].toLowerCase();
+  }
+
+  const weekdayMatch = value.match(
+    new RegExp(`\\b((?:next|this)\\s+(?:${weekdayPattern})|(?:${weekdayPattern}))\\b`, "i")
+  );
+
+  if (weekdayMatch) {
+    return weekdayMatch[1].toLowerCase();
+  }
+
+  const monthName =
+    "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+  const monthFirstMatch = value.match(
+    new RegExp(`\\b((?:${monthName})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?)\\b`, "i")
+  );
+  const dayFirstMatch = value.match(
+    new RegExp(`\\b(\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${monthName})(?:,?\\s+\\d{4})?)\\b`, "i")
+  );
+  const numericDateMatch = value.match(/\b(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\b/);
+
+  return cleanVoiceText(
+    monthFirstMatch?.[1] || dayFirstMatch?.[1] || numericDateMatch?.[1]
+  );
+}
+
+function extractMeridiem(text) {
+  const value = cleanVoiceText(text);
+
+  if (/\b(midnight|a\.?m\.?|morning)\b/i.test(value)) {
+    return "AM";
+  }
+
+  if (/\b(noon|p\.?m\.?|afternoon|evening|tonight|night)\b/i.test(value)) {
+    return "PM";
+  }
+
+  return "";
+}
+
+function normalizeClockText(hour, minute = "00") {
+  const numericHour = Number.parseInt(
+    spokenHourValues[String(hour).toLowerCase()] || hour,
+    10
+  );
+
+  if (!Number.isFinite(numericHour)) {
+    return "";
+  }
+
+  return `${numericHour}:${String(minute || "00").padStart(2, "0")}`;
+}
+
+function extractClockPhrase(text) {
+  const value = cleanVoiceText(text)
+    .replace(/\b(\d{1,2})\s*:\s*([0-5]\d)\b/g, "$1:$2")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (/\b(noon|midday)\b/i.test(value)) {
+    return "12:00";
+  }
+
+  if (/\bmidnight\b/i.test(value)) {
+    return "12:00";
+  }
+
+  const colonMatch = value.match(
+    /\b((?:[01]?\d|2[0-3]):[0-5]\d)\s*(?:a\.?m\.?|p\.?m\.?)?\b/i
+  );
+
+  if (colonMatch) {
+    return colonMatch[1];
+  }
+
+  const spacedTimeMatch = value.match(
+    /\b((?:[01]?\d|2[0-3])\s+[0-5]\d)\s*(?:a\.?m\.?|p\.?m\.?)?\b/i
+  );
+
+  if (spacedTimeMatch) {
+    const [hour, minute] = spacedTimeMatch[1].split(/\s+/);
+    return normalizeClockText(hour, minute);
+  }
+
+  const meridiemHourMatch = value.match(
+    new RegExp(
+      `\\b((?:1[0-2]|0?[1-9])|${Object.keys(spokenHourValues).join("|")})\\s*(?:a\\.?m\\.?|p\\.?m\\.?)\\b`,
+      "i"
+    )
+  );
+
+  if (meridiemHourMatch) {
+    return normalizeClockText(meridiemHourMatch[1]);
+  }
+
+  const prefixedHourMatch = value.match(
+    new RegExp(
+      `\\b(?:at|by|around|for)\\s+((?:2[0-3]|1[0-9]|0?[1-9])|${Object.keys(spokenHourValues).join("|")})\\b(?!\\s*(?:minutes?|mins?|hours?|hrs?|days?))`,
+      "i"
+    )
+  );
+
+  if (prefixedHourMatch) {
+    return normalizeClockText(prefixedHourMatch[1]);
+  }
+
+  const shortReplyMatch = value.match(
+    new RegExp(`^((?:1[0-2]|0?[1-9])|${Object.keys(spokenHourValues).join("|")})$`, "i")
+  );
+
+  return shortReplyMatch ? normalizeClockText(shortReplyMatch[1]) : "";
+}
+
+function mergeTimeDetails(previousDetails, text) {
+  const previous = previousDetails || {
+    day: "",
+    clock: "",
+    meridiem: "",
+    relative: "",
+  };
+  const relative = extractRelativeTimePhrase(text);
+  const day = extractDayPhrase(text);
+  const clock = extractClockPhrase(text);
+  const meridiem = extractMeridiem(text);
+
+  if (relative && !day && !clock && !meridiem) {
+    return {
+      day: "",
+      clock: "",
+      meridiem: "",
+      relative,
+    };
+  }
+
+  return {
+    day: day || previous.day || "",
+    clock: clock || previous.clock || "",
+    meridiem: meridiem || previous.meridiem || "",
+    relative: "",
+  };
+}
+
+function clockNeedsMeridiem(clock, meridiem) {
+  if (!clock || meridiem) {
+    return false;
+  }
+
+  const hour = Number.parseInt(clock.split(":")[0], 10);
+  return hour >= 1 && hour <= 12;
+}
+
+function formatClockForQuestion(clock) {
+  return cleanVoiceText(clock).replace(/^0(?=\d)/, "");
+}
+
+function formatTimeForQuestion(details) {
+  const clock = formatClockForQuestion(details?.clock || "that time");
+  const suffix = details?.meridiem ? ` ${details.meridiem}` : "";
+
+  return details?.day ? `${details.day} at ${clock}${suffix}` : `${clock}${suffix}`;
+}
+
+function buildResolvedTimePhrase(details) {
+  if (!details) {
+    return "";
+  }
+
+  if (details.relative) {
+    return details.relative;
+  }
+
+  if (!details.day || !details.clock || clockNeedsMeridiem(details.clock, details.meridiem)) {
+    return "";
+  }
+
+  const clock = formatClockForQuestion(details.clock);
+  const suffix = details.meridiem ? ` ${details.meridiem}` : "";
+  return `${details.day} at ${clock}${suffix}`;
+}
+
+function getNextTimeDetailStep(details, options) {
+  const nextDetails = details || {};
+
+  if (nextDetails.relative) {
+    return null;
+  }
+
+  if (!nextDetails.day) {
+    return {
+      asking: `${options.prefix}Day`,
+      question: nextDetails.clock
+        ? options.dayWithClock(formatClockForQuestion(nextDetails.clock))
+        : options.day,
+    };
+  }
+
+  if (!nextDetails.clock) {
+    return {
+      asking: `${options.prefix}Time`,
+      question: options.time(nextDetails.day),
+    };
+  }
+
+  if (clockNeedsMeridiem(nextDetails.clock, nextDetails.meridiem)) {
+    return {
+      asking: `${options.prefix}Meridiem`,
+      question: options.meridiem(formatTimeForQuestion(nextDetails)),
+    };
+  }
+
+  return null;
+}
+
+function isTimeDetailQuestion(asking, prefix) {
+  return [`${prefix}Day`, `${prefix}Time`, `${prefix}Meridiem`].includes(asking);
+}
+
 function extractMeetingTitle(text) {
   const cleanTextValue = cleanVoiceText(text);
   const withMatch = cleanTextValue.match(
@@ -239,46 +494,79 @@ function extractReminderLead(text) {
   return `${match[1]} ${unit} before`;
 }
 
+function extractExplicitReminderTimePhrase(text) {
+  const cleanTextValue = cleanVoiceText(text);
+  const reminderTimeMatch =
+    cleanTextValue.match(
+      /\b(?:reminder|alarm|alert)\s+(?:at|by|around|for)\s+(.+?)(?:\s+(?:for|about|to)\b|[,.;]|$)/i
+    ) ||
+    cleanTextValue.match(
+      /\bremind\s+me\s+(?:at|by|around|for)\s+(.+?)(?:\s+(?:for|about|to)\b|[,.;]|$)/i
+    );
+
+  return reminderTimeMatch ? extractMeetingTimePhrase(reminderTimeMatch[1]) : "";
+}
+
 function getReminderPreference(text) {
   if (isNegativeReply(text) || /\b(without|skip|no)\s+(a\s+)?(reminder|alarm|alert)\b/i.test(text)) {
-    return { wantsReminder: false, lead: "" };
+    return { wantsReminder: false, lead: "", absoluteTime: "" };
   }
 
   const lead = extractReminderLead(text);
+  const absoluteTime = extractExplicitReminderTimePhrase(text);
 
-  if (lead || /\b(yes|yeah|yep|sure|please|remind|reminder|alarm|alert)\b/i.test(text)) {
+  if (lead || absoluteTime || /\b(yes|yeah|yep|sure|please|remind|reminder|alarm|alert)\b/i.test(text)) {
     return {
       wantsReminder: true,
-      lead:
-        lead ||
-        (hasDateOrTime(text) ? `at ${extractMeetingTimePhrase(text)}` : ""),
+      lead,
+      absoluteTime,
     };
   }
 
-  return { wantsReminder: null, lead: "" };
+  return { wantsReminder: null, lead: "", absoluteTime: "" };
 }
 
 function createMeetingConversation(command) {
   const title = extractMeetingTitle(command);
-  const time = hasDateOrTime(command) ? extractMeetingTimePhrase(command) : "";
+  const timeDetails = mergeTimeDetails(null, command);
+  const time = buildResolvedTimePhrase(timeDetails);
   const reminderPreference = getReminderPreference(command);
+  const reminderTimeDetails = reminderPreference.absoluteTime
+    ? mergeTimeDetails(null, reminderPreference.absoluteTime)
+    : null;
+  const reminderLead =
+    reminderPreference.lead ||
+    (reminderTimeDetails ? buildReminderLeadFromDetails(reminderTimeDetails) : "");
 
   return {
     type: "meeting",
     title,
     time,
+    timeDetails,
     wantsReminder: reminderPreference.wantsReminder,
-    reminderLead: reminderPreference.lead,
+    reminderLead,
+    reminderTimeDetails,
     asking: "",
   };
 }
 
+function buildReminderLeadFromDetails(details) {
+  const resolved = buildResolvedTimePhrase(details);
+  return resolved ? `at ${resolved}` : "";
+}
+
 function getNextMeetingStep(conversation) {
-  if (!conversation.time) {
-    return {
-      asking: "time",
-      question: "Okay. What time should I schedule it for?",
-    };
+  const timeStep = getNextTimeDetailStep(conversation.timeDetails, {
+    prefix: "meetingTime",
+    day: "What day should I schedule the meeting for?",
+    dayWithClock: (clock) =>
+      `What day should I schedule the meeting for at ${clock}?`,
+    time: (day) => `What exact time should I use for ${day}?`,
+    meridiem: (time) => `Is that ${time} AM or PM?`,
+  });
+
+  if (timeStep) {
+    return timeStep;
   }
 
   if (!conversation.title) {
@@ -295,6 +583,21 @@ function getNextMeetingStep(conversation) {
     };
   }
 
+  if (conversation.wantsReminder && conversation.reminderTimeDetails) {
+    const reminderTimeStep = getNextTimeDetailStep(conversation.reminderTimeDetails, {
+      prefix: "meetingReminderTime",
+      day: "What day should I set that reminder for?",
+      dayWithClock: (clock) =>
+        `What day should I set that reminder for at ${clock}?`,
+      time: (day) => `What exact reminder time should I use for ${day}?`,
+      meridiem: (time) => `Is the reminder at ${time} AM or PM?`,
+    });
+
+    if (reminderTimeStep) {
+      return reminderTimeStep;
+    }
+  }
+
   if (conversation.wantsReminder && !conversation.reminderLead) {
     return {
       asking: "reminderLead",
@@ -309,16 +612,12 @@ function updateMeetingConversation(conversation, reply) {
   const nextConversation = { ...conversation };
   const cleanReply = cleanVoiceText(reply);
 
-  if (conversation.asking === "time") {
-    if (!hasDateOrTime(cleanReply)) {
-      return {
-        conversation: nextConversation,
-        question: "I need the meeting time first. What day and time should I use?",
-      };
-    }
-
-    nextConversation.time =
-      extractMeetingTimePhrase(cleanReply) || cleanMeetingTimeReply(cleanReply);
+  if (isTimeDetailQuestion(conversation.asking, "meetingTime")) {
+    nextConversation.timeDetails = mergeTimeDetails(
+      nextConversation.timeDetails,
+      cleanReply
+    );
+    nextConversation.time = buildResolvedTimePhrase(nextConversation.timeDetails);
   }
 
   if (conversation.asking === "title") {
@@ -333,7 +632,7 @@ function updateMeetingConversation(conversation, reply) {
   if (conversation.asking === "reminder") {
     const preference = getReminderPreference(cleanReply);
     const absoluteReminderTime = hasDateOrTime(cleanReply)
-      ? extractMeetingTimePhrase(cleanReply)
+      ? preference.absoluteTime || extractMeetingTimePhrase(cleanReply)
       : "";
 
     if (preference.wantsReminder === null && !absoluteReminderTime) {
@@ -345,14 +644,20 @@ function updateMeetingConversation(conversation, reply) {
 
     nextConversation.wantsReminder =
       preference.wantsReminder === null ? true : preference.wantsReminder;
+    nextConversation.reminderLead = preference.lead;
+    nextConversation.reminderTimeDetails = absoluteReminderTime
+      ? mergeTimeDetails(nextConversation.reminderTimeDetails, absoluteReminderTime)
+      : null;
     nextConversation.reminderLead =
-      preference.lead || (absoluteReminderTime ? `at ${absoluteReminderTime}` : "");
+      nextConversation.reminderLead ||
+      buildReminderLeadFromDetails(nextConversation.reminderTimeDetails);
   }
 
   if (conversation.asking === "reminderLead") {
     if (isNegativeReply(cleanReply)) {
       nextConversation.wantsReminder = false;
       nextConversation.reminderLead = "";
+      nextConversation.reminderTimeDetails = null;
     } else {
       const lead = extractReminderLead(cleanReply);
       const absoluteReminderTime = hasDateOrTime(cleanReply)
@@ -366,9 +671,24 @@ function updateMeetingConversation(conversation, reply) {
         };
       }
 
+      nextConversation.reminderLead = lead;
+      nextConversation.reminderTimeDetails = absoluteReminderTime
+        ? mergeTimeDetails(nextConversation.reminderTimeDetails, absoluteReminderTime)
+        : null;
       nextConversation.reminderLead =
-        lead || (absoluteReminderTime ? `at ${absoluteReminderTime}` : "");
+        nextConversation.reminderLead ||
+        buildReminderLeadFromDetails(nextConversation.reminderTimeDetails);
     }
+  }
+
+  if (isTimeDetailQuestion(conversation.asking, "meetingReminderTime")) {
+    nextConversation.reminderTimeDetails = mergeTimeDetails(
+      nextConversation.reminderTimeDetails,
+      cleanReply
+    );
+    nextConversation.reminderLead = buildReminderLeadFromDetails(
+      nextConversation.reminderTimeDetails
+    );
   }
 
   const nextStep = getNextMeetingStep(nextConversation);
@@ -388,11 +708,14 @@ function updateMeetingConversation(conversation, reply) {
 
 function buildMeetingConversationCommand(conversation) {
   const title = cleanVoiceText(conversation.title) || "New Meeting";
-  const reminderLead = cleanVoiceText(conversation.reminderLead);
+  const time = buildResolvedTimePhrase(conversation.timeDetails) || conversation.time;
+  const reminderLead =
+    cleanVoiceText(conversation.reminderLead) ||
+    buildReminderLeadFromDetails(conversation.reminderTimeDetails);
 
   if (conversation.wantsReminder && /^at\s+/i.test(reminderLead)) {
     return [
-      `Schedule a meeting titled "${title}" for ${conversation.time} without reminder.`,
+      `Schedule a meeting titled "${title}" for ${time} without reminder.`,
       `Set a reminder titled "${title} Reminder" ${reminderLead} for that meeting.`,
     ].join(" ");
   }
@@ -401,7 +724,7 @@ function buildMeetingConversationCommand(conversation) {
     ? ` with a reminder ${reminderLead}`
     : " without reminder";
 
-  return `Schedule a meeting titled "${title}" for ${conversation.time}${reminderText}.`;
+  return `Schedule a meeting titled "${title}" for ${time}${reminderText}.`;
 }
 
 function noOptionalValue(text) {
@@ -454,17 +777,29 @@ function extractStandaloneReminderTitle(command) {
 }
 
 function createReminderConversation(command) {
+  const timeDetails = mergeTimeDetails(null, command);
+
   return {
     type: "reminder",
     title: extractStandaloneReminderTitle(command),
-    time: hasDateOrTime(command) ? extractMeetingTimePhrase(command) : "",
+    time: buildResolvedTimePhrase(timeDetails),
+    timeDetails,
     asking: "",
   };
 }
 
 function getNextReminderStep(conversation) {
-  if (!conversation.time) {
-    return { asking: "time", question: "What time should I remind you?" };
+  const timeStep = getNextTimeDetailStep(conversation.timeDetails, {
+    prefix: "reminderTime",
+    day: "What day should I set the reminder for?",
+    dayWithClock: (clock) =>
+      `What day should I set the reminder for at ${clock}?`,
+    time: (day) => `What exact time should I remind you on ${day}?`,
+    meridiem: (time) => `Is the reminder at ${time} AM or PM?`,
+  });
+
+  if (timeStep) {
+    return timeStep;
   }
 
   if (!conversation.title) {
@@ -478,15 +813,12 @@ function updateReminderConversation(conversation, reply) {
   const nextConversation = { ...conversation };
   const cleanReply = cleanVoiceText(reply);
 
-  if (conversation.asking === "time") {
-    if (!hasDateOrTime(cleanReply)) {
-      return {
-        conversation: nextConversation,
-        question: "What time should I remind you? You can say 12:10 or in 5 minutes.",
-      };
-    }
-
-    nextConversation.time = extractMeetingTimePhrase(cleanReply);
+  if (isTimeDetailQuestion(conversation.asking, "reminderTime")) {
+    nextConversation.timeDetails = mergeTimeDetails(
+      nextConversation.timeDetails,
+      cleanReply
+    );
+    nextConversation.time = buildResolvedTimePhrase(nextConversation.timeDetails);
   }
 
   if (conversation.asking === "title") {
@@ -503,7 +835,8 @@ function updateReminderConversation(conversation, reply) {
 }
 
 function buildReminderConversationCommand(conversation) {
-  return `Set a reminder titled "${conversation.title}" for ${conversation.time}.`;
+  const time = buildResolvedTimePhrase(conversation.timeDetails) || conversation.time;
+  return `Set a reminder titled "${conversation.title}" for ${time}.`;
 }
 
 function hasTaskIntent(command) {
