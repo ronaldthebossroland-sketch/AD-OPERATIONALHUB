@@ -119,6 +119,236 @@ function needsMeetingDateTime(command) {
   );
 }
 
+function hasMeetingSchedulingIntent(command) {
+  return (
+    /\b(schedule|create|book|set up|set|arrange)\b.*\b(meeting|appointment|call)\b/i.test(
+      command
+    ) || /\bmeeting\s+with\b/i.test(command)
+  );
+}
+
+function hasDateOrTime(text) {
+  return /\b(today|tomorrow|tonight|morning|afternoon|evening|noon|midnight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+\w+|this\s+\w+|at\s+\d{1,2}|by\s+\d{1,2}|for\s+\d{1,2}|\d{1,2}:\d{2}|\d{1,2}\s*(am|pm))\b/i.test(
+    text
+  );
+}
+
+function extractMeetingTitle(text) {
+  const cleanTextValue = cleanVoiceText(text);
+  const withMatch = cleanTextValue.match(
+    /\b(?:meeting|appointment|call)\s+with\s+(.+?)(?:\s+(?:today|tomorrow|tonight|on|at|by|for|around|from|next|this|in\s+\d+)\b|[,.;]|$)/i
+  );
+  const titledMatch = cleanTextValue.match(
+    /\b(?:called|titled|about|regarding)\s+(.+?)(?:\s+(?:today|tomorrow|tonight|on|at|by|for|around|from|next|this|in\s+\d+)\b|[,.;]|$)/i
+  );
+
+  const candidate = cleanVoiceText(withMatch?.[1] || titledMatch?.[1]);
+
+  if (!candidate || /^(me|myself|it)$/i.test(candidate)) {
+    return "";
+  }
+
+  return /^meeting\b/i.test(candidate) ? candidate : `Meeting with ${candidate}`;
+}
+
+function cleanMeetingTimeReply(text) {
+  return cleanVoiceText(text)
+    .replace(/^(it'?s|make it|set it|schedule it|for|at)\s+/i, "")
+    .trim();
+}
+
+function extractMeetingTimePhrase(text) {
+  const cleanTextValue = cleanVoiceText(text);
+  const dateWords =
+    "today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\\s+\\w+|this\\s+\\w+";
+  const clock = "\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?";
+  const patterns = [
+    new RegExp(`\\b((?:${dateWords})\\s+(?:at|by|around|for)?\\s*${clock})\\b`, "i"),
+    new RegExp(`\\b((?:at|by|around|for)\\s+${clock}\\s*(?:${dateWords})?)\\b`, "i"),
+    new RegExp(`\\b(${clock}\\s+(?:${dateWords}))\\b`, "i"),
+    new RegExp(`\\b(${clock})\\b`, "i"),
+    new RegExp(`\\b(${dateWords})\\b`, "i"),
+  ];
+
+  for (const pattern of patterns) {
+    const match = cleanTextValue.match(pattern);
+
+    if (match) {
+      return cleanMeetingTimeReply(match[1]);
+    }
+  }
+
+  return "";
+}
+
+function extractReminderLead(text) {
+  const cleanTextValue = cleanVoiceText(text);
+
+  if (/\bhalf\s+(an\s+)?hour\b/i.test(cleanTextValue)) {
+    return "30 minutes before";
+  }
+
+  if (/\b(an|one)\s+hour\b/i.test(cleanTextValue)) {
+    return "1 hour before";
+  }
+
+  const match = cleanTextValue.match(
+    /\b(\d+)\s*(minutes?|mins?|hours?|hrs?|days?)\s*(before|early|ahead|prior)?\b/i
+  );
+
+  if (!match) {
+    return "";
+  }
+
+  const unit = match[2]
+    .toLowerCase()
+    .replace(/^mins?$/, "minutes")
+    .replace(/^hrs?$/, "hours");
+  return `${match[1]} ${unit} before`;
+}
+
+function getReminderPreference(text) {
+  if (isNegativeReply(text) || /\b(without|skip|no)\s+(a\s+)?(reminder|alarm|alert)\b/i.test(text)) {
+    return { wantsReminder: false, lead: "" };
+  }
+
+  const lead = extractReminderLead(text);
+
+  if (lead || /\b(yes|yeah|yep|sure|please|remind|reminder|alarm|alert)\b/i.test(text)) {
+    return { wantsReminder: true, lead };
+  }
+
+  return { wantsReminder: null, lead: "" };
+}
+
+function createMeetingConversation(command) {
+  const title = extractMeetingTitle(command);
+  const time = hasDateOrTime(command) ? extractMeetingTimePhrase(command) : "";
+  const reminderPreference = getReminderPreference(command);
+
+  return {
+    type: "meeting",
+    title,
+    time,
+    wantsReminder: reminderPreference.wantsReminder,
+    reminderLead: reminderPreference.lead,
+    asking: "",
+  };
+}
+
+function getNextMeetingStep(conversation) {
+  if (!conversation.time) {
+    return {
+      asking: "time",
+      question: "Okay. What time should I schedule it for?",
+    };
+  }
+
+  if (!conversation.title) {
+    return {
+      asking: "title",
+      question: "Who is the meeting with, or what should I call it?",
+    };
+  }
+
+  if (conversation.wantsReminder === null) {
+    return {
+      asking: "reminder",
+      question: "Do you want a reminder for it?",
+    };
+  }
+
+  if (conversation.wantsReminder && !conversation.reminderLead) {
+    return {
+      asking: "reminderLead",
+      question: "How long before the meeting should I remind you?",
+    };
+  }
+
+  return null;
+}
+
+function updateMeetingConversation(conversation, reply) {
+  const nextConversation = { ...conversation };
+  const cleanReply = cleanVoiceText(reply);
+
+  if (conversation.asking === "time") {
+    if (!hasDateOrTime(cleanReply)) {
+      return {
+        conversation: nextConversation,
+        question: "I need the meeting time first. What day and time should I use?",
+      };
+    }
+
+    nextConversation.time =
+      extractMeetingTimePhrase(cleanReply) || cleanMeetingTimeReply(cleanReply);
+  }
+
+  if (conversation.asking === "title") {
+    const title = extractMeetingTitle(cleanReply);
+    nextConversation.title =
+      title ||
+      (/^(with|for)\b/i.test(cleanReply)
+        ? `Meeting ${cleanReply}`
+        : cleanReply);
+  }
+
+  if (conversation.asking === "reminder") {
+    const preference = getReminderPreference(cleanReply);
+
+    if (preference.wantsReminder === null) {
+      return {
+        conversation: nextConversation,
+        question: "Should I add a reminder for this meeting?",
+      };
+    }
+
+    nextConversation.wantsReminder = preference.wantsReminder;
+    nextConversation.reminderLead = preference.lead;
+  }
+
+  if (conversation.asking === "reminderLead") {
+    if (isNegativeReply(cleanReply)) {
+      nextConversation.wantsReminder = false;
+      nextConversation.reminderLead = "";
+    } else {
+      const lead = extractReminderLead(cleanReply);
+
+      if (!lead) {
+        return {
+          conversation: nextConversation,
+          question: "How long before the meeting should I remind you? For example, 15 minutes before.",
+        };
+      }
+
+      nextConversation.reminderLead = lead;
+    }
+  }
+
+  const nextStep = getNextMeetingStep(nextConversation);
+
+  if (nextStep) {
+    return {
+      conversation: { ...nextConversation, asking: nextStep.asking },
+      question: nextStep.question,
+    };
+  }
+
+  return {
+    conversation: nextConversation,
+    question: "",
+  };
+}
+
+function buildMeetingConversationCommand(conversation) {
+  const title = cleanVoiceText(conversation.title) || "New Meeting";
+  const reminderText = conversation.wantsReminder
+    ? ` with a reminder ${conversation.reminderLead}`
+    : " without reminder";
+
+  return `Schedule a meeting titled "${title}" for ${conversation.time}${reminderText}.`;
+}
+
 function isSensitiveCommand(command) {
   return /\b(send|delete|archive|remove|deactivate|approve|reject)\b/i.test(
     command
@@ -323,6 +553,7 @@ export default function useVoiceAgent({
   const [continuousMode, setContinuousMode] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
   const [typedReply, setTypedReply] = useState("");
+  const [pendingConversation, setPendingConversation] = useState(null);
   const [pendingFollowUp, setPendingFollowUp] = useState(null);
   const [pendingConfirmation, setPendingConfirmation] = useState(null);
 
@@ -338,16 +569,23 @@ export default function useVoiceAgent({
   const silenceTimerRef = useRef(null);
   const runCommandRef = useRef(null);
   const startListeningRef = useRef(null);
+  const pendingConversationRef = useRef(null);
   const pendingFollowUpRef = useRef(null);
   const pendingConfirmationRef = useRef(null);
   const continuousModeRef = useRef(false);
 
-  const hasPendingQuestion = Boolean(pendingFollowUp || pendingConfirmation);
+  const hasPendingQuestion = Boolean(
+    pendingConversation || pendingFollowUp || pendingConfirmation
+  );
 
   const lastAssistantMessage = useMemo(
     () => [...messages].reverse().find((message) => message.role === "assistant"),
     [messages]
   );
+
+  useEffect(() => {
+    pendingConversationRef.current = pendingConversation;
+  }, [pendingConversation]);
 
   useEffect(() => {
     pendingFollowUpRef.current = pendingFollowUp;
@@ -504,69 +742,7 @@ export default function useVoiceAgent({
     }
   }
 
-  async function runCommand(commandText) {
-    const heardCommand = cleanVoiceText(commandText);
-    const finalCommand = normalizeSpokenCommand(heardCommand);
-
-    if (!heardCommand) {
-      await respond("I did not catch a command. Please try again.");
-      return;
-    }
-
-    appendMessage(createUserMessage(heardCommand));
-    setLiveTranscript("");
-    setTypedReply("");
-
-    if (isCasualGreetingOnly(heardCommand, finalCommand)) {
-      await respond("Hi. I am listening and ready for your next command.");
-      return;
-    }
-
-    const navigationIntent = getNavigationIntent(finalCommand);
-
-    if (navigationIntent) {
-      onNavigate?.(navigationIntent);
-      await respond(`Opening ${navigationLabel(navigationIntent)}.`);
-      return;
-    }
-
-    const pendingConfirmationValue = pendingConfirmationRef.current;
-    const pendingFollowUpValue = pendingFollowUpRef.current;
-
-    if (pendingConfirmationValue) {
-      if (isNegativeReply(finalCommand)) {
-        setPendingConfirmation(null);
-        await respond("Cancelled. I will not take that action.");
-        return;
-      }
-
-      if (!isPositiveReply(finalCommand)) {
-        await respond("Please say yes to confirm, or no to cancel.");
-        return;
-      }
-    } else if (isSensitiveCommand(finalCommand)) {
-      const reply =
-        "That may be sensitive. I will not send, delete, archive, or approve anything automatically. Should I continue with a safe draft or approval request only?";
-      setPendingConfirmation({ command: finalCommand });
-      await respond(reply);
-      return;
-    }
-
-    if (!pendingFollowUpValue && needsMeetingDateTime(finalCommand)) {
-      const reply = "What day and time should I schedule that meeting?";
-      setPendingFollowUp({ command: finalCommand, question: reply });
-      await respond(reply);
-      return;
-    }
-
-    const commandToRun = pendingFollowUpValue
-      ? `${pendingFollowUpValue.command}. ${finalCommand}`
-      : pendingConfirmationValue
-        ? `${pendingConfirmationValue.command}. Confirmed: create safe drafts or approval records only. Do not send, delete, archive, or approve automatically.`
-        : finalCommand;
-
-    setPendingFollowUp(null);
-    setPendingConfirmation(null);
+  async function executeCommandText(commandToRun) {
     setIsRunning(true);
     setStatus("executing");
 
@@ -622,6 +798,115 @@ export default function useVoiceAgent({
     } finally {
       setIsRunning(false);
     }
+  }
+
+  async function continueMeetingConversation(reply) {
+    const conversation = pendingConversationRef.current;
+
+    if (!conversation || conversation.type !== "meeting") {
+      return false;
+    }
+
+    const update = updateMeetingConversation(conversation, reply);
+
+    if (update.question) {
+      setPendingConversation(update.conversation);
+      await respond(update.question);
+      return true;
+    }
+
+    setPendingConversation(null);
+    await executeCommandText(buildMeetingConversationCommand(update.conversation));
+    return true;
+  }
+
+  async function startMeetingConversation(command) {
+    const conversation = createMeetingConversation(command);
+    const nextStep = getNextMeetingStep(conversation);
+
+    if (nextStep) {
+      setPendingConversation({ ...conversation, asking: nextStep.asking });
+      await respond(nextStep.question);
+      return;
+    }
+
+    setPendingConversation(null);
+    await executeCommandText(buildMeetingConversationCommand(conversation));
+  }
+
+  async function runCommand(commandText) {
+    const heardCommand = cleanVoiceText(commandText);
+    const finalCommand = normalizeSpokenCommand(heardCommand);
+
+    if (!heardCommand) {
+      await respond("I did not catch a command. Please try again.");
+      return;
+    }
+
+    appendMessage(createUserMessage(heardCommand));
+    setLiveTranscript("");
+    setTypedReply("");
+
+    if (await continueMeetingConversation(heardCommand)) {
+      return;
+    }
+
+    if (isCasualGreetingOnly(heardCommand, finalCommand)) {
+      await respond("Hi. I am listening and ready for your next command.");
+      return;
+    }
+
+    const navigationIntent = getNavigationIntent(finalCommand);
+
+    if (navigationIntent) {
+      onNavigate?.(navigationIntent);
+      await respond(`Opening ${navigationLabel(navigationIntent)}.`);
+      return;
+    }
+
+    if (hasMeetingSchedulingIntent(finalCommand)) {
+      await startMeetingConversation(heardCommand);
+      return;
+    }
+
+    const pendingConfirmationValue = pendingConfirmationRef.current;
+    const pendingFollowUpValue = pendingFollowUpRef.current;
+
+    if (pendingConfirmationValue) {
+      if (isNegativeReply(finalCommand)) {
+        setPendingConfirmation(null);
+        await respond("Cancelled. I will not take that action.");
+        return;
+      }
+
+      if (!isPositiveReply(finalCommand)) {
+        await respond("Please say yes to confirm, or no to cancel.");
+        return;
+      }
+    } else if (isSensitiveCommand(finalCommand)) {
+      const reply =
+        "That may be sensitive. I will not send, delete, archive, or approve anything automatically. Should I continue with a safe draft or approval request only?";
+      setPendingConfirmation({ command: finalCommand });
+      await respond(reply);
+      return;
+    }
+
+    if (!pendingFollowUpValue && needsMeetingDateTime(finalCommand)) {
+      const reply = "What day and time should I schedule that meeting?";
+      setPendingFollowUp({ command: finalCommand, question: reply });
+      await respond(reply);
+      return;
+    }
+
+    const commandToRun = pendingFollowUpValue
+      ? `${pendingFollowUpValue.command}. ${finalCommand}`
+      : pendingConfirmationValue
+        ? `${pendingConfirmationValue.command}. Confirmed: create safe drafts or approval records only. Do not send, delete, archive, or approve automatically.`
+        : finalCommand;
+
+    setPendingFollowUp(null);
+    setPendingConfirmation(null);
+    await executeCommandText(commandToRun);
   }
 
   useEffect(() => {
