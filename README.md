@@ -1,6 +1,6 @@
-# AD Operational Hub
+# Executive Virtual AI Assistant
 
-AD Operational Hub is a Vite React frontend with an Express/Supabase backend.
+Executive Virtual AI Assistant is a Vite React frontend with an Express/Supabase backend.
 
 ## Web Deployment
 
@@ -24,7 +24,7 @@ The Android wrapper uses Capacitor and keeps the existing web deployment intact.
 
 Capacitor app settings:
 
-- App name: `AD Operational Hub`
+- App name: `Executive Virtual AI Assistant`
 - App ID: `com.adoperationalhub.app`
 - Web directory: `dist`
 - Live URL: `https://ad-operationalhub-seven.vercel.app`

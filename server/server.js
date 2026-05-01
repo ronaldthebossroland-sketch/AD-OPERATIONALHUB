@@ -95,7 +95,7 @@ app.use((error, _req, res, next) => {
 function healthStatus() {
   return {
     status: "ok",
-    message: "AD Operational Hub API is running",
+    message: "Executive Virtual AI Assistant API is running",
   };
 }
 
@@ -393,7 +393,7 @@ function sendGoogleError(res, error, statusCode = 500) {
           <p>Google could not complete sign-in for this hub.</p>
           <code>${String(detail).replaceAll("<", "&lt;").replaceAll(">", "&gt;")}</code>
           <p>Return to the app after confirming your account is active.</p>
-          <a href="${APP_HOME_URL}">Return to AD Hub</a>
+          <a href="${APP_HOME_URL}">Return to Executive Virtual AI Assistant</a>
         </main>
       </body>
     </html>
@@ -1033,8 +1033,8 @@ app.get("/auth/google/callback", async (req, res) => {
         res,
         new Error(
           inactive
-            ? "This Google account has been deactivated for AD Operational Hub."
-            : "This Google account could not be authorized for AD Operational Hub."
+            ? "This Google account has been deactivated for Executive Virtual AI Assistant."
+            : "This Google account could not be authorized for Executive Virtual AI Assistant."
         ),
         403
       );
@@ -1142,8 +1142,8 @@ app.post("/api/auth/supabase", async (req, res) => {
     if (!user) {
       return res.status(403).json({
         error: inactive
-          ? "This Google account has been deactivated for AD Operational Hub."
-          : "This Google account could not be authorized for AD Operational Hub.",
+          ? "This Google account has been deactivated for Executive Virtual AI Assistant."
+          : "This Google account could not be authorized for Executive Virtual AI Assistant.",
       });
     }
 
@@ -2128,7 +2128,7 @@ app.post("/api/calendar/assistant", requireRole(...ADMIN_ROLES), async (req, res
 
     const existingEvents = await listRecentRows("calendar_events", 80);
     const reply = await askAI(`
-You are the AI Schedule Assistant for AD Operational Hub.
+You are the AI Schedule Assistant for Executive Virtual AI Assistant.
 Return JSON only. No markdown.
 Current date/time: ${new Date().toISOString()}
 
@@ -3487,7 +3487,7 @@ function normalizeCommandPlan(plan, command) {
 
 function buildPlannerPrompt(command, context) {
   return `
-You are a multi-intent command planner for AD Operational Hub.
+You are a multi-intent command planner for Executive Virtual AI Assistant.
 Split the user command into separate actionable intents.
 Return JSON only. Do not include markdown.
 
@@ -4508,7 +4508,7 @@ app.post("/api/daily-briefing", requireLogin, async (req, res) => {
   try {
     const context = await buildCommandContext(req);
     const briefing = await askAI(`
-Generate a daily operational briefing for AD Operational Hub.
+Generate a daily operational briefing for Executive Virtual AI Assistant.
 Use only the records in this backend context. Do not invent missing data.
 
 Cover these sections in a concise executive style:
@@ -4544,7 +4544,7 @@ app.post("/api/ask-hub", requireLogin, async (req, res) => {
     const context = await buildCommandContext(req);
     const sources = buildHubSources(context, question);
     const answer = await askAI(`
-Answer the user's question using only AD Operational Hub backend records.
+Answer the user's question using only Executive Virtual AI Assistant backend records.
 If the records do not contain the answer, say what is missing.
 Mention source titles naturally, but do not invent links.
 

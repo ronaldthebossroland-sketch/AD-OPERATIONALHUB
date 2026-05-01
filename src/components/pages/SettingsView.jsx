@@ -184,7 +184,7 @@ export default function SettingsView({ currentUser: currentUserFromApp, onLogout
                     Access Settings
                   </h2>
                   <p className="text-sm text-slate-500">
-                    Manage real users who can access the AD Operational Hub.
+                    Manage real users who can access Executive Virtual AI Assistant.
                   </p>
                 </div>
               </div>

@@ -1,4 +1,4 @@
-import { Clock3, LogOut, Sparkles } from "lucide-react";
+import { Clock3, LogOut } from "lucide-react";
 
 import { Button } from "../ui/button";
 
@@ -42,12 +42,16 @@ export default function Sidebar({
     <>
       <aside className="hidden h-full w-72 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-5 lg:block">
         <div className="flex items-center gap-3">
-          <div className="rounded-2xl bg-slate-950 p-3 text-white">
-            <Sparkles className="h-6 w-6" />
-          </div>
-          <div>
-            <h1 className="text-lg font-black">AD Hub</h1>
-            <p className="text-xs text-slate-500">Operational AI Assistant</p>
+          <img
+            src="/logo-mark.svg"
+            alt="Executive Virtual AI Assistant"
+            className="h-14 w-14 shrink-0 rounded-2xl shadow-sm"
+          />
+          <div className="min-w-0">
+            <h1 className="text-base font-black leading-tight text-slate-950">
+              Executive Virtual AI Assistant
+            </h1>
+            <p className="mt-1 text-xs text-slate-500">Premium command assistant</p>
           </div>
         </div>
 

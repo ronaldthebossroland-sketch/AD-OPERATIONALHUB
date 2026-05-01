@@ -524,7 +524,7 @@ export default function ADOperationalHub() {
 
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm font-bold text-slate-500">
-        Loading AD Operational Hub...
+        Loading Executive Virtual AI Assistant...
       </div>
     );
   }
