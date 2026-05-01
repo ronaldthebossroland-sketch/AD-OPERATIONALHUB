@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ShieldAlert } from "lucide-react";
 
+import AuthCallbackPage from "./components/auth/AuthCallbackPage";
 import LoginPage from "./components/auth/LoginPage";
 import Header from "./components/layout/Header";
 import Sidebar from "./components/layout/Sidebar";
@@ -108,14 +109,31 @@ export default function ADOperationalHub() {
     );
   }, [activeView]);
 
+  const isAuthCallbackPath =
+    typeof window !== "undefined" &&
+    window.location.pathname === "/auth/callback";
+
+  const handleAuthComplete = useCallback((user) => {
+    setCurrentUser(user);
+    setActiveView("dashboard");
+    setAuthLoading(false);
+
+    if (
+      typeof window !== "undefined" &&
+      window.history?.replaceState &&
+      window.location.pathname === "/auth/callback"
+    ) {
+      window.history.replaceState({}, document.title, "/");
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     let removeOAuthDeepLinkHandler = () => {};
 
     registerOAuthDeepLinkHandler((user) => {
       if (isMounted) {
-        setCurrentUser(user);
-        setActiveView("dashboard");
+        handleAuthComplete(user);
       }
     })
       .then((removeHandler) => {
@@ -142,8 +160,7 @@ export default function ADOperationalHub() {
 
         if (syncedUser) {
           if (isMounted) {
-            setCurrentUser(syncedUser);
-            setActiveView("dashboard");
+            handleAuthComplete(syncedUser);
           }
           return;
         }
@@ -170,7 +187,7 @@ export default function ADOperationalHub() {
       isMounted = false;
       removeOAuthDeepLinkHandler();
     };
-  }, []);
+  }, [handleAuthComplete]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -470,11 +487,19 @@ export default function ADOperationalHub() {
   };
 
   if (authLoading) {
+    if (isAuthCallbackPath) {
+      return <AuthCallbackPage onAuthenticated={handleAuthComplete} />;
+    }
+
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm font-bold text-slate-500">
         Loading AD Operational Hub...
       </div>
     );
+  }
+
+  if (isAuthCallbackPath) {
+    return <AuthCallbackPage onAuthenticated={handleAuthComplete} />;
   }
 
   if (!currentUser) {

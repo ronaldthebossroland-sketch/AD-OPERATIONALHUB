@@ -30,7 +30,8 @@
 
                 <data
                     android:scheme="capacitor"
-                    android:host="localhost" />
+                    android:host="localhost"
+                    android:pathPrefix="/auth/callback" />
             </intent-filter>
 
         </activity>

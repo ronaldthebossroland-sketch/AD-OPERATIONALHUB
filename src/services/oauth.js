@@ -2,7 +2,7 @@ import { App } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Capacitor } from "@capacitor/core";
 
-import { API_BASE_URL, loginWithSupabaseToken } from "./api";
+import { loginWithSupabaseToken } from "./api";
 import {
   isSupabaseAuthConfigured,
   supabase,
@@ -68,7 +68,9 @@ function isOAuthReturnUrl(url) {
   try {
     const { parsedUrl } = readAuthParams(url);
     const isNativeReturn =
-      parsedUrl.protocol === "capacitor:" && parsedUrl.host === "localhost";
+      parsedUrl.protocol === "capacitor:" &&
+      parsedUrl.host === "localhost" &&
+      parsedUrl.pathname.startsWith("/auth/callback");
     const isWebReturn =
       parsedUrl.href.startsWith(SUPABASE_WEB_REDIRECT_URL) ||
       parsedUrl.href.startsWith(SUPABASE_LOCAL_REDIRECT_URL);
@@ -230,9 +232,5 @@ export async function syncSupabaseAuthSession() {
 }
 
 export async function connectGmailWithGoogle() {
-  await Browser.open({
-    presentationStyle: "fullscreen",
-    url: `${API_BASE_URL}/auth/google`,
-    windowName: "_self",
-  });
+  return signInWithGoogle();
 }
