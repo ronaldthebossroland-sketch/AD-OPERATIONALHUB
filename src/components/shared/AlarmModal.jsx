@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { AlertTriangle, Clock3, ExternalLink, Volume2, X } from "lucide-react";
 
+import { playCalmVoiceAlert, stopBrowserSpeech } from "../../services/voicePlayback";
 import { Button } from "../ui/button";
 
 function playAlarmTone(stage) {
@@ -11,27 +12,33 @@ function playAlarmTone(stage) {
   }
 
   const audioContext = new AudioContextClass();
-  const oscillator = audioContext.createOscillator();
-  const gain = audioContext.createGain();
+  const masterGain = audioContext.createGain();
+  const notes = stage === "overdue" ? [392, 523.25, 659.25] : [440, 554.37, 659.25];
+  const startedAt = audioContext.currentTime + 0.03;
 
-  oscillator.type = stage === "overdue" ? "sawtooth" : "square";
-  oscillator.frequency.value = stage === "overdue" ? 740 : 880;
-  gain.gain.value = 0.09;
+  masterGain.gain.value = 0.0001;
+  masterGain.connect(audioContext.destination);
 
-  oscillator.connect(gain);
-  gain.connect(audioContext.destination);
-  oscillator.start();
-  oscillator.stop(audioContext.currentTime + 1.1);
-  oscillator.onended = () => audioContext.close().catch(() => {});
-}
+  notes.forEach((frequency, index) => {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    const noteStart = startedAt + index * 0.18;
+    const noteEnd = noteStart + 0.42;
 
-function speak(text) {
-  if (!window.speechSynthesis || !text) {
-    return;
-  }
+    oscillator.type = "sine";
+    oscillator.frequency.value = frequency;
+    gain.gain.setValueAtTime(0.0001, noteStart);
+    gain.gain.exponentialRampToValueAtTime(stage === "overdue" ? 0.06 : 0.045, noteStart + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+    oscillator.connect(gain);
+    gain.connect(masterGain);
+    oscillator.start(noteStart);
+    oscillator.stop(noteEnd);
+  });
 
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  window.setTimeout(() => {
+    audioContext.close().catch(() => {});
+  }, 1200);
 }
 
 function toDatetimeLocalValue(date) {
@@ -72,8 +79,24 @@ export default function AlarmModal({
       return;
     }
 
+    let stopVoice = null;
+    let isMounted = true;
+
     playAlarmTone(notification.stage);
-    speak(notification.speakText);
+    playCalmVoiceAlert(notification.speakText).then((stop) => {
+      if (!isMounted) {
+        stop?.();
+        return;
+      }
+
+      stopVoice = stop;
+    });
+
+    return () => {
+      isMounted = false;
+      stopVoice?.();
+      stopBrowserSpeech();
+    };
   }, [notification]);
 
   const snoozeOptions = useMemo(
@@ -104,10 +127,10 @@ export default function AlarmModal({
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs font-black uppercase tracking-wide text-slate-400">
-                  Mission Control Alert
+                <p className="text-xs font-black uppercase tracking-wide text-amber-700">
+                  Executive Reminder
                 </p>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">
+                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-black text-amber-800">
                   {notification.stageLabel}
                 </span>
                 {notification.highRisk && (
@@ -134,10 +157,10 @@ export default function AlarmModal({
           </button>
         </div>
 
-        <div className="mt-6 rounded-3xl bg-slate-50 p-4">
+        <div className="mt-6 rounded-3xl border border-amber-100 bg-amber-50/60 p-4">
           <div className="flex items-center gap-2 text-sm font-black text-slate-700">
             <Volume2 className="h-4 w-4" />
-            Voice alert
+            Spoken briefing
           </div>
           <p className="mt-2 text-sm leading-6 text-slate-500">
             {notification.speakText}

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { playCalmVoiceAlert } from "../services/voicePlayback";
+
 const CHECK_INTERVAL_MS = 30_000;
 const MINUTE_MS = 60_000;
 const RECENT_OVERDUE_MS = 24 * 60 * 60 * 1000;
@@ -185,26 +187,32 @@ function stageLabel(stage) {
   return labels[stage] || "Upcoming";
 }
 
+function voiceTitle(title) {
+  return String(title || "this reminder")
+    .replace(/\s+reminder$/i, "")
+    .trim() || "this reminder";
+}
+
 function announcementFor(notification, stage) {
-  const title = notification.title || "reminder";
+  const title = voiceTitle(notification.title);
 
   if (stage === "overdue") {
-    return `Alert. Your ${title} time has passed. Please mark it done, snooze, or reschedule.`;
+    return `${title} is now past its scheduled time. I can keep it visible while you mark it complete, snooze it, or choose a new time.`;
   }
 
   if (stage === "critical") {
-    return `Urgent. Your ${title} starts now.`;
+    return `It is time for ${title}. I have it ready for your attention now.`;
   }
 
   if (stage === "urgent") {
-    return `Attention. Your ${title} starts in 10 minutes.`;
+    return `${title} is coming up in about ten minutes. I will keep it on your radar.`;
   }
 
   if (stage === "approaching") {
-    return `Reminder. Your ${title} starts in 30 minutes.`;
+    return `${title} is coming up in about thirty minutes. You have a little time to prepare.`;
   }
 
-  return notification.speakText || `${title} is upcoming.`;
+  return notification.speakText || `${title} is on your schedule.`;
 }
 
 function snoozeOptionsFor(stage, dueAt, now) {
@@ -378,15 +386,6 @@ function notificationSort(left, right) {
   return leftTime - rightTime;
 }
 
-function speak(text) {
-  if (!window.speechSynthesis || !text) {
-    return;
-  }
-
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-}
-
 function loadDismissedNotifications() {
   if (typeof window === "undefined") {
     return new Set();
@@ -488,7 +487,7 @@ export default function useSmartAlarms({
 
       if (!spokenKeysRef.current.has(key)) {
         spokenKeysRef.current.add(key);
-        speak(notification.speakText);
+        playCalmVoiceAlert(notification.speakText).catch(() => {});
       }
     }
   }, [visibleNotifications]);
