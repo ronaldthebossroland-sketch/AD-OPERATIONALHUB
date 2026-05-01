@@ -21,9 +21,16 @@ const APP_HOME_URL = (
   process.env.CLIENT_ORIGIN ||
   "http://localhost:5173"
 ).replace(/\/+$/, "");
+const DEFAULT_APP_ORIGINS = [
+  "https://ad-operationalhub-seven.vercel.app",
+  "http://localhost:5173",
+  "http://localhost",
+  "capacitor://localhost",
+];
 const ALLOWED_ORIGINS = Array.from(
   new Set(
     [
+      ...DEFAULT_APP_ORIGINS,
       APP_HOME_URL,
       ...(process.env.CORS_ORIGINS || "")
         .split(",")
@@ -32,6 +39,8 @@ const ALLOWED_ORIGINS = Array.from(
     ].filter(Boolean)
   )
 );
+const VERCEL_DEPLOYMENT_ORIGIN_PATTERN =
+  /^https:\/\/ad-operationalhub(?:-[a-z0-9-]+)?\.vercel\.app$/i;
 const APP_USER_COLUMNS =
   "id,name,email,role,access,is_active,auth_provider,created_at";
 const APP_USER_AUTH_COLUMNS = `${APP_USER_COLUMNS},password_hash`;
@@ -47,7 +56,13 @@ if (process.env.TRUST_PROXY === "true" || process.env.NODE_ENV === "production")
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || ALLOWED_ORIGINS.includes(origin.replace(/\/+$/, ""))) {
+      const normalizedOrigin = origin?.replace(/\/+$/, "");
+
+      if (
+        !normalizedOrigin ||
+        ALLOWED_ORIGINS.includes(normalizedOrigin) ||
+        VERCEL_DEPLOYMENT_ORIGIN_PATTERN.test(normalizedOrigin)
+      ) {
         callback(null, true);
         return;
       }
