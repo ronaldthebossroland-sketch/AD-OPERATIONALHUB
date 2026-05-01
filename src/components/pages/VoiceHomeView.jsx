@@ -84,6 +84,8 @@ export default function VoiceHomeView({
     continuousMode,
     isListening,
     isRunning,
+    lastAssistantMessage,
+    liveTranscript,
     setContinuousMode,
     status,
     toggleListening,
@@ -101,23 +103,37 @@ export default function VoiceHomeView({
   }, [continuousMode, setContinuousMode]);
 
   const disabled = isRunning || status === "speaking";
+  const statusText =
+    liveTranscript ||
+    (isListening
+      ? "Listening..."
+      : status === "speaking"
+        ? lastAssistantMessage?.text || "Speaking..."
+        : isRunning || status === "thinking" || status === "executing"
+          ? "Working..."
+          : lastAssistantMessage?.text || "Ready.");
 
   return (
-    <div className="voice-home grid min-h-[100dvh] place-items-center">
-      <button
-        type="button"
-        onClick={toggleListening}
-        disabled={disabled}
-        className={`voice-home__button ${isListening ? "is-listening" : ""}`}
-        aria-label={isListening ? "Stop voice agent" : "Start voice agent"}
-      >
-        <VoiceIcon
-          isListening={isListening}
-          isRunning={isRunning}
-          status={status}
-        />
-        <span>{buttonLabel({ isListening, isRunning, status })}</span>
-      </button>
+    <div className="voice-home grid min-h-[calc(100dvh-13rem)] place-items-center py-12">
+      <div className="voice-home__stage">
+        <button
+          type="button"
+          onClick={toggleListening}
+          disabled={disabled}
+          className={`voice-home__button ${isListening ? "is-listening" : ""}`}
+          aria-label={isListening ? "Stop voice agent" : "Start voice agent"}
+        >
+          <VoiceIcon
+            isListening={isListening}
+            isRunning={isRunning}
+            status={status}
+          />
+          <span>{buttonLabel({ isListening, isRunning, status })}</span>
+        </button>
+        <p className="voice-home__status" aria-live="polite">
+          {statusText}
+        </p>
+      </div>
     </div>
   );
 }

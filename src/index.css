@@ -842,12 +842,20 @@ body,
   background: #f7f7f4;
 }
 
+.voice-home__stage {
+  display: grid;
+  width: min(100%, 34rem);
+  justify-items: center;
+  gap: 1.35rem;
+  text-align: center;
+}
+
 .voice-home__button {
   display: inline-flex;
-  width: min(72vw, 23rem);
-  height: min(72vw, 23rem);
-  min-width: 15rem;
-  min-height: 15rem;
+  width: min(62vw, 19rem);
+  height: min(62vw, 19rem);
+  min-width: 13rem;
+  min-height: 13rem;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -890,4 +898,13 @@ body,
 .voice-home__button:disabled {
   cursor: wait;
   opacity: 0.92;
+}
+
+.voice-home__status {
+  min-height: 1.6em;
+  max-width: min(100%, 30rem);
+  color: #667085;
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.6;
 }

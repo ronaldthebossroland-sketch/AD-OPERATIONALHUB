@@ -315,7 +315,7 @@ export default function useVoiceAgent({
   onStartTranscribing,
 } = {}) {
   const [messages, setMessages] = useState([
-    createAssistantMessage("Voice agent ready. Press Start Voice Agent and speak naturally."),
+    createAssistantMessage("Ready."),
   ]);
   const [status, setStatus] = useState("ready");
   const [isListening, setIsListening] = useState(false);
@@ -490,12 +490,14 @@ export default function useVoiceAgent({
     });
   }
 
-  async function respond(text, result = null) {
+  async function respond(text, result = null, options = {}) {
+    const { continueListening = true } = options;
+
     appendMessage(createAssistantMessage(text, result));
     await speakAsync(text);
     setStatus("ready");
 
-    if (continuousModeRef.current) {
+    if (continueListening && continuousModeRef.current) {
       window.setTimeout(() => {
         startListeningRef.current?.({ greet: false });
       }, 350);
@@ -652,7 +654,9 @@ export default function useVoiceAgent({
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextClass) {
-      await respond("Microphone voice command is not supported in this browser.");
+      await respond("Microphone is not available in this browser.", null, {
+        continueListening: false,
+      });
       return;
     }
 
@@ -664,7 +668,7 @@ export default function useVoiceAgent({
       setStatus("listening");
 
       if (greet) {
-        appendMessage(createAssistantMessage("Ready. I am listening."));
+        appendMessage(createAssistantMessage("Listening."));
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -682,7 +686,11 @@ export default function useVoiceAgent({
         closeVoiceResources();
         setIsListening(false);
         setStatus("ready");
-        await respond(sessionData.error || "Could not start the voice agent session.");
+        await respond(
+          sessionData.error || "Could not start the voice agent session.",
+          null,
+          { continueListening: false }
+        );
         return;
       }
 
@@ -748,7 +756,8 @@ export default function useVoiceAgent({
       };
 
       socket.onerror = () => {
-        appendMessage(createAssistantMessage("Voice agent connection failed."));
+        appendMessage(createAssistantMessage("Voice connection failed. Please try again."));
+        setStatus("ready");
       };
 
       socket.onclose = () => {
@@ -758,11 +767,15 @@ export default function useVoiceAgent({
         socketRef.current = null;
         setIsListening(false);
       };
-    } catch {
+    } catch (error) {
       closeVoiceResources();
       setIsListening(false);
       setStatus("ready");
-      await respond("Could not start the voice agent. Check microphone permission.");
+      const message =
+        error?.name === "NotAllowedError" || error?.name === "SecurityError"
+          ? "Microphone access is blocked. Allow microphone access and try again."
+          : "Could not start the voice agent. Check microphone permission.";
+      await respond(message, null, { continueListening: false });
     }
   }
 

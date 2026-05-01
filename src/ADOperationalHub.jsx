@@ -585,14 +585,6 @@ export default function ADOperationalHub() {
     return <LoginPage onLogin={setCurrentUser} />;
   }
 
-  if (activeView === "assistant") {
-    return (
-      <div className="voice-shell h-[100dvh] overflow-hidden bg-slate-100 text-slate-950">
-        {renderView()}
-      </div>
-    );
-  }
-
   return (
     <div className="luxury-app h-[100dvh] overflow-hidden bg-slate-100 text-slate-950">
       <div className="flex h-full min-w-0">
