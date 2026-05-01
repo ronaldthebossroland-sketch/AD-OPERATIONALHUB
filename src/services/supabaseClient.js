@@ -27,7 +27,7 @@ export const supabase = isSupabaseAuthConfigured
       auth: {
         autoRefreshToken: true,
         detectSessionInUrl: false,
-        flowType: "pkce",
+        flowType: "implicit",
         persistSession: true,
       },
     })
