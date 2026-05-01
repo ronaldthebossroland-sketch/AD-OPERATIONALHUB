@@ -1,6 +1,6 @@
 export function Card({ children, className = "", ...props }) {
   return (
-    <div className={className} {...props}>
+    <div className={`luxury-card ${className}`} {...props}>
       {children}
     </div>
   );

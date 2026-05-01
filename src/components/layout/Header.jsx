@@ -152,18 +152,18 @@ export default function Header({
   }
 
   return (
-    <header className="mb-8 flex min-w-0 flex-col justify-between gap-4 md:flex-row md:items-center">
+    <header className="luxury-header mb-8 flex min-w-0 flex-col justify-between gap-4 md:flex-row md:items-center">
       <div className="min-w-0">
         <motion.h1
           key={activeLabel}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
-          className="break-words text-2xl font-black tracking-tight text-slate-950 md:text-4xl"
+          className="luxury-title break-words text-2xl font-black tracking-tight text-slate-950 md:text-4xl"
         >
           {activeLabel}
         </motion.h1>
-        <p className="mt-2 text-sm text-slate-500">
+        <p className="mt-2 text-sm font-semibold text-slate-500">
           Operational command center for executive ministry leadership.
         </p>
       </div>
@@ -175,10 +175,10 @@ export default function Header({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search meetings, partners, tasks..."
-            className="w-full min-w-0 rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none transition focus:border-slate-400 sm:w-80"
+            className="luxury-search-input w-full min-w-0 rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none transition focus:border-slate-400 sm:w-80"
           />
           {query.trim() && (
-            <div className="absolute left-0 right-0 top-full z-50 mt-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
+            <div className="luxury-popover absolute left-0 right-0 top-full z-50 mt-3 rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
               {searchResults.length === 0 ? (
                 <p className="px-3 py-2 text-sm font-bold text-slate-500">
                   No live records found.
@@ -195,9 +195,9 @@ export default function Header({
                           openView(result.view);
                           setQuery("");
                         }}
-                        className="flex min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-slate-50"
+                        className="luxury-popover-row flex min-w-0 items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-slate-50"
                       >
-                        <div className="rounded-2xl bg-slate-100 p-2">
+                        <div className="luxury-soft-icon rounded-2xl bg-slate-100 p-2">
                           <Icon className="h-4 w-4 text-slate-700" />
                         </div>
                         <div className="min-w-0">
@@ -258,7 +258,7 @@ export default function Header({
         </Button>
 
         {briefOpen && (
-          <div className="absolute left-0 right-0 top-full z-40 mt-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-xl sm:left-auto sm:w-[28rem]">
+          <div className="luxury-popover absolute left-0 right-0 top-full z-40 mt-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-xl sm:left-auto sm:w-[28rem]">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="font-black text-slate-950">
@@ -268,7 +268,7 @@ export default function Header({
                   A compact action snapshot for the next operating window.
                 </p>
               </div>
-              <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
+              <span className="luxury-role-pill shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
                 {currentUser?.role || "Viewer"}
               </span>
             </div>
@@ -281,9 +281,9 @@ export default function Header({
                   <button
                     key={item.label}
                     onClick={() => openView(item.view)}
-                    className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-100 p-3 text-left transition hover:bg-slate-50"
+                    className="luxury-popover-row flex min-w-0 items-center gap-3 rounded-2xl border border-slate-100 p-3 text-left transition hover:bg-slate-50"
                   >
-                    <div className="rounded-2xl bg-slate-100 p-2">
+                    <div className="luxury-soft-icon rounded-2xl bg-slate-100 p-2">
                       <Icon className="h-4 w-4 text-slate-700" />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -307,19 +307,19 @@ export default function Header({
             <div className="mt-4 grid grid-cols-3 gap-2">
               <button
                 onClick={() => openView("meetings")}
-                className="rounded-2xl bg-slate-100 px-2 py-3 text-xs font-bold text-slate-700"
+                className="luxury-mini-action rounded-2xl bg-slate-100 px-2 py-3 text-xs font-bold text-slate-700"
               >
                 Meetings
               </button>
               <button
                 onClick={() => openView("emails")}
-                className="rounded-2xl bg-slate-100 px-2 py-3 text-xs font-bold text-slate-700"
+                className="luxury-mini-action rounded-2xl bg-slate-100 px-2 py-3 text-xs font-bold text-slate-700"
               >
                 Emails
               </button>
               <button
                 onClick={() => openView("operations")}
-                className="rounded-2xl bg-slate-100 px-2 py-3 text-xs font-bold text-slate-700"
+                className="luxury-mini-action rounded-2xl bg-slate-100 px-2 py-3 text-xs font-bold text-slate-700"
               >
                 Ops
               </button>

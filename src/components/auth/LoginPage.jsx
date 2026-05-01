@@ -127,13 +127,13 @@ export default function LoginPage({ onLogin }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4 text-slate-950">
-      <div className="w-full max-w-[28rem] rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
+    <div className="luxury-auth flex min-h-screen items-center justify-center bg-slate-100 p-4 text-slate-950">
+      <div className="luxury-login-card w-full max-w-[28rem] rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
         <div className="flex items-center gap-3">
           <img
             src="/logo-mark.svg"
             alt="Executive Virtual AI Assistant"
-            className="h-14 w-14 shrink-0 rounded-2xl shadow-sm"
+            className="luxury-logo h-14 w-14 shrink-0 rounded-2xl shadow-sm"
           />
           <div className="min-w-0">
             <h1 className="break-words text-lg font-black sm:text-xl">
@@ -145,9 +145,9 @@ export default function LoginPage({ onLogin }) {
           </div>
         </div>
 
-        <div className="mt-8 rounded-3xl bg-slate-50 p-5">
+        <div className="luxury-login-welcome mt-8 rounded-3xl bg-slate-50 p-5">
           <div className="flex items-center gap-3">
-            <div className="rounded-2xl bg-white p-3 text-slate-700 shadow-sm">
+            <div className="luxury-soft-icon rounded-2xl bg-white p-3 text-slate-700 shadow-sm">
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
@@ -163,7 +163,7 @@ export default function LoginPage({ onLogin }) {
         </div>
 
         <form onSubmit={handlePasswordAuth} className="mt-5 space-y-3">
-          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+          <div className="luxury-segmented grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
             <button
               type="button"
               onClick={() => {

@@ -77,8 +77,8 @@ function canAccessView(user, view) {
 
 function AccessRestricted({ currentUser }) {
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+    <div className="luxury-panel rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+      <div className="luxury-soft-icon mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
         <ShieldAlert className="h-6 w-6" />
       </div>
       <h2 className="mt-4 text-xl font-black text-slate-950">
@@ -573,7 +573,7 @@ export default function ADOperationalHub() {
   }
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-slate-100 text-slate-950">
+    <div className="luxury-app h-[100dvh] overflow-hidden bg-slate-100 text-slate-950">
       <div className="flex h-full min-w-0">
         <Sidebar
           activeView={activeView}
@@ -587,7 +587,7 @@ export default function ADOperationalHub() {
 
         <main
           ref={mainScrollRef}
-          className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 pb-24 md:p-8"
+          className="luxury-main min-h-0 min-w-0 flex-1 overflow-y-auto p-4 pb-24 md:p-8"
         >
           <div className="mx-auto w-full max-w-7xl">
             <Header
@@ -619,7 +619,7 @@ export default function ADOperationalHub() {
               transition={{ duration: 0.25 }}
             >
               {(dataLoading || dataError) && (
-                <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600">
+                <div className="luxury-panel mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600">
                   {dataLoading ? "Loading live operational records..." : dataError}
                 </div>
               )}
