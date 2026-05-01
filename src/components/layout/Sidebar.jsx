@@ -40,7 +40,7 @@ export default function Sidebar({
 
   return (
     <>
-      <aside className="hidden w-72 border-r border-slate-200 bg-white p-5 lg:block">
+      <aside className="hidden h-full w-72 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-5 lg:block">
         <div className="flex items-center gap-3">
           <div className="rounded-2xl bg-slate-950 p-3 text-white">
             <Sparkles className="h-6 w-6" />

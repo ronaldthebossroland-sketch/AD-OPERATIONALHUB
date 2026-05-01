@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ShieldAlert } from "lucide-react";
 
@@ -34,6 +34,7 @@ import {
 } from "./services/api";
 import {
   registerOAuthDeepLinkHandler,
+  signOutSupabaseAuth,
   syncSupabaseAuthSession,
 } from "./services/oauth";
 
@@ -91,6 +92,7 @@ export default function ADOperationalHub() {
   const [transcriptionAutoStartKey, setTranscriptionAutoStartKey] = useState(0);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState("");
+  const mainScrollRef = useRef(null);
 
   const canManageAccess = currentUser?.role === "Super Admin";
   const canManageOperations =
@@ -262,8 +264,17 @@ export default function ADOperationalHub() {
     };
   }, [currentUser]);
 
+  useEffect(() => {
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTop = 0;
+    }
+  }, [activeView]);
+
   async function handleLogout() {
     try {
+      await signOutSupabaseAuth().catch((error) => {
+        console.warn("Could not clear Supabase auth session:", error);
+      });
       await logoutUser();
     } finally {
       setCurrentUser(null);
@@ -507,8 +518,8 @@ export default function ADOperationalHub() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-slate-100 text-slate-950">
-      <div className="flex min-h-screen min-w-0">
+    <div className="h-[100dvh] overflow-hidden bg-slate-100 text-slate-950">
+      <div className="flex h-full min-w-0">
         <Sidebar
           activeView={activeView}
           currentUser={currentUser}
@@ -519,7 +530,10 @@ export default function ADOperationalHub() {
           setActiveView={setActiveView}
         />
 
-        <main className="min-w-0 flex-1 p-4 pb-24 md:p-8">
+        <main
+          ref={mainScrollRef}
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 pb-24 md:p-8"
+        >
           <div className="mx-auto w-full max-w-7xl">
             <Header
               alerts={alerts}

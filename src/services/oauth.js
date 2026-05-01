@@ -119,6 +119,9 @@ export async function signInWithGoogle() {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
+      queryParams: {
+        prompt: "select_account",
+      },
       redirectTo,
       skipBrowserRedirect: isNative,
     },
@@ -229,6 +232,18 @@ export async function syncSupabaseAuthSession() {
   }
 
   return syncAppSessionFromSupabase();
+}
+
+export async function signOutSupabaseAuth() {
+  if (!isSupabaseAuthConfigured || !supabase) {
+    return;
+  }
+
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    throw error;
+  }
 }
 
 export async function connectGmailWithGoogle() {
