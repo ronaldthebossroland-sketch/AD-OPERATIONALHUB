@@ -27,6 +27,10 @@ import {
   runAICommand,
 } from "../../services/api";
 import {
+  cancelDeviceReminder,
+  scheduleDeviceReminder,
+} from "../../services/mobileCapabilities";
+import {
   getSmartAlarmStage,
   parseSmartAlarmDueDate,
 } from "../../hooks/useSmartAlarms";
@@ -315,10 +319,24 @@ function QuickAICommand({
 
     if (action.type === "meeting" && data.meeting) {
       setMeetings?.((previous) => [data.meeting, ...previous]);
+
+      if (data.alarm) {
+        setReminders?.((previous) => [data.alarm, ...previous]);
+        scheduleDeviceReminder(data.alarm, { setNativeAlarm: true }).catch(
+          (error) => {
+            console.warn("Could not schedule device reminder:", error);
+          }
+        );
+      }
     }
 
     if (action.type === "alarm" && data.alarm) {
       setReminders?.((previous) => [data.alarm, ...previous]);
+      scheduleDeviceReminder(data.alarm, { setNativeAlarm: true }).catch(
+        (error) => {
+          console.warn("Could not schedule device reminder:", error);
+        }
+      );
     }
 
     if (action.type === "operation_alert") {
@@ -1072,6 +1090,9 @@ export default function DashboardView({
       setReminders?.((previous) =>
         previous.filter((item) => item.id !== reminder.id)
       );
+      cancelDeviceReminder(reminder).catch((error) => {
+        console.warn("Could not cancel device reminder:", error);
+      });
       setAlertMessage("Reminder removed.");
     } catch {
       setAlertMessage("Could not reach the reminders API.");

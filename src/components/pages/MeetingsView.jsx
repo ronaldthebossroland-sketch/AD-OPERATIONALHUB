@@ -8,6 +8,7 @@ import {
   runAICommand,
   updateMeeting,
 } from "../../services/api";
+import { scheduleDeviceReminder } from "../../services/mobileCapabilities";
 import SectionHeader from "../shared/SectionHeader";
 import StatusPill from "../shared/StatusPill";
 import { Button } from "../ui/button";
@@ -123,6 +124,13 @@ ${JSON.stringify(meeting)}
 
       if (createdAlarms.length > 0) {
         setReminders?.((prev) => [...createdAlarms, ...prev]);
+        createdAlarms.forEach((alarm) => {
+          scheduleDeviceReminder(alarm, { setNativeAlarm: true }).catch(
+            (error) => {
+              console.warn("Could not schedule device reminder:", error);
+            }
+          );
+        });
       }
 
       setSourceText("");

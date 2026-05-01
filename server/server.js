@@ -794,53 +794,257 @@ async function attachGmailTokensFromProvider(req, expectedEmail) {
   return true;
 }
 
-function parseDateLike(value) {
+const WEEKDAY_INDEX = {
+  sunday: 0,
+  sun: 0,
+  monday: 1,
+  mon: 1,
+  tuesday: 2,
+  tue: 2,
+  tues: 2,
+  wednesday: 3,
+  wed: 3,
+  thursday: 4,
+  thu: 4,
+  thur: 4,
+  thurs: 4,
+  friday: 5,
+  fri: 5,
+  saturday: 6,
+  sat: 6,
+};
+
+const MONTH_INDEX = {
+  january: 0,
+  jan: 0,
+  february: 1,
+  feb: 1,
+  march: 2,
+  mar: 2,
+  april: 3,
+  apr: 3,
+  may: 4,
+  june: 5,
+  jun: 5,
+  july: 6,
+  jul: 6,
+  august: 7,
+  aug: 7,
+  september: 8,
+  sep: 8,
+  sept: 8,
+  october: 9,
+  oct: 9,
+  november: 10,
+  nov: 10,
+  december: 11,
+  dec: 11,
+};
+
+function startOfLocalDay(date = new Date()) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function parseTimeParts(text) {
+  const value = cleanText(text);
+  const timeCandidate =
+    value.match(
+      /\b(?:at|by|before|around|for)\s+((?:[01]?\d|2[0-3]):[0-5]\d)\s*(AM|PM)?\b/i
+    ) ||
+    value.match(
+      /\b(?:at|by|before|around|for)\s+((?:1[0-2]|0?[1-9])\s*(?:AM|PM))\b/i
+    ) ||
+    value.match(/\b((?:[01]?\d|2[0-3]):[0-5]\d)\s*(AM|PM)?\b/i) ||
+    value.match(/\b((?:1[0-2]|0?[1-9])\s*(?:AM|PM))\b/i);
+
+  if (timeCandidate) {
+    const timeMatch = timeCandidate[1]
+      .replace(/\s+/g, " ")
+      .trim()
+      .match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+
+    if (timeMatch) {
+      return {
+        hour: Number.parseInt(timeMatch[1], 10),
+        minute: Number.parseInt(timeMatch[2] || "0", 10),
+        meridiem: (timeMatch[3] || timeCandidate[2] || "").toUpperCase(),
+      };
+    }
+  }
+
+  const spokenMatch = value.match(
+    /\b(?:at|by|before|around|for)\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d{1,2})\s?(am|pm)?\b/i
+  );
+  const wordNumbers = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+  };
+
+  if (spokenMatch) {
+    return {
+      hour:
+        wordNumbers[spokenMatch[1].toLowerCase()] ||
+        Number.parseInt(spokenMatch[1], 10),
+      minute: 0,
+      meridiem: (spokenMatch[2] || "").toUpperCase(),
+    };
+  }
+
+  return null;
+}
+
+function parseDateAnchor(text, baseDate = new Date()) {
+  const value = cleanText(text);
+  const lower = value.toLowerCase();
+  const base = startOfLocalDay(baseDate);
+
+  if (/\bday after tomorrow\b/i.test(value)) {
+    const date = new Date(base);
+    date.setDate(date.getDate() + 2);
+    return date;
+  }
+
+  if (/\btomorrow\b/i.test(value)) {
+    const date = new Date(base);
+    date.setDate(date.getDate() + 1);
+    return date;
+  }
+
+  if (/\btoday\b/i.test(value)) {
+    return new Date(base);
+  }
+
+  if (/\bnext week\b/i.test(value)) {
+    const date = new Date(base);
+    date.setDate(date.getDate() + 7);
+    return date;
+  }
+
+  const weekdayMatch = lower.match(
+    /\b(next\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday|day)?|wed(?:nesday)?|thu(?:r|rs|rsday|rday|day)?|fri(?:day)?|sat(?:urday)?)\b/i
+  );
+
+  if (weekdayMatch) {
+    const dayIndex = WEEKDAY_INDEX[weekdayMatch[2].toLowerCase()];
+
+    if (dayIndex !== undefined) {
+      const date = new Date(base);
+      let delta = (dayIndex - date.getDay() + 7) % 7;
+
+      if (delta === 0 || weekdayMatch[1]) {
+        delta = delta === 0 ? 7 : delta;
+      }
+
+      date.setDate(date.getDate() + delta);
+      return date;
+    }
+  }
+
+  const monthNamePattern = Object.keys(MONTH_INDEX).join("|");
+  const monthFirstMatch = lower.match(
+    new RegExp(`\\b(${monthNamePattern})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, "i")
+  );
+  const dayFirstMatch = lower.match(
+    new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthNamePattern})(?:,?\\s+(\\d{4}))?\\b`, "i")
+  );
+  const numericDateMatch = lower.match(
+    /\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/
+  );
+
+  if (monthFirstMatch || dayFirstMatch) {
+    const monthName = monthFirstMatch?.[1] || dayFirstMatch?.[2];
+    const day = Number.parseInt(monthFirstMatch?.[2] || dayFirstMatch?.[1], 10);
+    const yearValue = monthFirstMatch?.[3] || dayFirstMatch?.[3];
+    const date = new Date(base);
+    date.setFullYear(
+      yearValue ? Number.parseInt(yearValue, 10) : base.getFullYear(),
+      MONTH_INDEX[monthName.toLowerCase()],
+      day
+    );
+
+    if (!yearValue && date.getTime() < base.getTime() - 24 * 60 * 60 * 1000) {
+      date.setFullYear(date.getFullYear() + 1);
+    }
+
+    return date;
+  }
+
+  if (numericDateMatch) {
+    const first = Number.parseInt(numericDateMatch[1], 10);
+    const second = Number.parseInt(numericDateMatch[2], 10);
+    const yearValue = numericDateMatch[3];
+    const date = new Date(base);
+    const fullYear = yearValue
+      ? Number.parseInt(yearValue.length === 2 ? `20${yearValue}` : yearValue, 10)
+      : base.getFullYear();
+
+    date.setFullYear(fullYear, first - 1, second);
+
+    if (!yearValue && date.getTime() < base.getTime() - 24 * 60 * 60 * 1000) {
+      date.setFullYear(date.getFullYear() + 1);
+    }
+
+    return date;
+  }
+
+  return null;
+}
+
+function parseFlexibleDateLike(value, { requireTime = false } = {}) {
   if (!value) {
     return null;
   }
 
+  const text = cleanText(value);
+  const hasExplicitTime = Boolean(parseTimeParts(text));
   const directDate = new Date(value);
 
-  if (!Number.isNaN(directDate.getTime())) {
+  if (
+    !Number.isNaN(directDate.getTime()) &&
+    (!requireTime ||
+      hasExplicitTime ||
+      /T\d{2}:\d{2}/.test(text) ||
+      /\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}/.test(text))
+  ) {
     return directDate;
   }
 
-  const text = cleanText(value);
-  const timeCandidate =
-    text.match(
-      /\b(?:at|by|before|around|for)\s+((?:[01]?\d|2[0-3]):[0-5]\d)\s*(AM|PM)?\b/i
-    ) ||
-    text.match(
-      /\b(?:at|by|before|around|for)\s+((?:1[0-2]|0?[1-9])\s*(?:AM|PM))\b/i
-    ) ||
-    text.match(/\b((?:[01]?\d|2[0-3]):[0-5]\d)\s*(AM|PM)?\b/i) ||
-    text.match(/\b((?:1[0-2]|0?[1-9])\s*(?:AM|PM))\b/i);
+  const dateAnchor = parseDateAnchor(text);
+  const timeParts = parseTimeParts(text);
 
-  if (!timeCandidate) {
+  if (requireTime && !timeParts) {
     return null;
   }
 
-  const timeMatch = timeCandidate[1]
-    .replace(/\s+/g, " ")
-    .trim()
-    .match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
-
-  if (!timeMatch) {
+  if (!dateAnchor && !timeParts) {
     return null;
   }
 
-  const date = new Date();
+  const date = dateAnchor || new Date();
 
-  if (/\btomorrow\b/i.test(text)) {
-    date.setDate(date.getDate() + 1);
+  if (!timeParts) {
+    date.setHours(0, 0, 0, 0);
+    return date;
   }
 
-  let hour = Number.parseInt(timeMatch[1], 10);
-  const minute = Number.parseInt(timeMatch[2] || "0", 10);
-  const meridiem = (timeMatch[3] || timeCandidate[2])?.toUpperCase();
+  let hour = timeParts.hour;
+  const minute = timeParts.minute;
+  const meridiem = timeParts.meridiem;
   const hasMeridiem = Boolean(meridiem);
 
-  if (!meridiem && !timeMatch[2]) {
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
     return null;
   }
 
@@ -854,7 +1058,13 @@ function parseDateLike(value) {
 
   date.setHours(hour, minute, 0, 0);
 
-  if (hasMeridiem || hour >= 12) {
+  if (dateAnchor || hasMeridiem || hour >= 12) {
+    if (!dateAnchor && !hasMeridiem && hour < 12 && date.getTime() < Date.now() - 5 * 60_000) {
+      const afternoon = new Date(date);
+      afternoon.setHours(hour + 12, minute, 0, 0);
+      return afternoon;
+    }
+
     return date;
   }
 
@@ -873,6 +1083,14 @@ function parseDateLike(value) {
   return candidates.find((candidate) => candidate.getTime() >= threshold) || date;
 }
 
+function parseDateLike(value) {
+  return parseFlexibleDateLike(value);
+}
+
+function parseDateTimeLike(value) {
+  return parseFlexibleDateLike(value, { requireTime: true });
+}
+
 function toIsoDate(value) {
   const date = parseDateLike(value);
   return date ? date.toISOString() : "";
@@ -880,6 +1098,29 @@ function toIsoDate(value) {
 
 function addMinutes(date, minutes) {
   return new Date(date.getTime() + minutes * 60_000);
+}
+
+function parseDurationMinutes(value, fallback = 60) {
+  const text = cleanText(value).toLowerCase();
+  const hourMatch = text.match(/\b(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b/i);
+  const minuteMatch = text.match(/\b(\d+)\s*(minutes?|mins?|m)\b/i);
+
+  if (hourMatch) {
+    return Math.max(15, Math.round(Number.parseFloat(hourMatch[1]) * 60));
+  }
+
+  if (minuteMatch) {
+    return Math.max(15, Number.parseInt(minuteMatch[1], 10));
+  }
+
+  return fallback;
+}
+
+function formatDateTimeForMeeting(date) {
+  return date.toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function minutesBeforeValue(value) {
@@ -927,6 +1168,76 @@ function resolveAlarmDueAt(reminderTime, relatedRecord, fallbackText = "") {
   const explicitFallbackDate = parseDateLike(fallbackText);
 
   return explicitFallbackDate ? explicitFallbackDate.toISOString() : "";
+}
+
+function resolveMeetingStartDate(data, command) {
+  for (const value of [
+    data?.start_at,
+    data?.startAt,
+    data?.starts_at,
+    data?.startsAt,
+    data?.due_at,
+    data?.dueAt,
+    data?.when,
+    data?.time,
+    command,
+  ]) {
+    const date = parseDateTimeLike(value);
+
+    if (date) {
+      return date;
+    }
+  }
+
+  return null;
+}
+
+function resolveMeetingEndDate(data, startDate) {
+  if (!startDate) {
+    return null;
+  }
+
+  for (const value of [data?.end_at, data?.endAt, data?.ends_at, data?.endsAt]) {
+    const date = parseDateTimeLike(value);
+
+    if (date && date.getTime() > startDate.getTime()) {
+      return date;
+    }
+  }
+
+  return addMinutes(startDate, parseDurationMinutes(data?.duration));
+}
+
+function meetingAlarmMinutesBefore(data, command, hasStartDate) {
+  const text = `${cleanText(command)} ${cleanText(data?.reminder_time)} ${cleanText(data?.alarm)}`;
+
+  if (!hasStartDate || /\b(no|without|skip)\s+(reminder|alarm|alert)\b/i.test(text)) {
+    return 0;
+  }
+
+  const explicit =
+    data?.alarm_minutes_before ??
+    data?.alarmMinutesBefore ??
+    data?.reminder_minutes_before ??
+    data?.reminderMinutesBefore;
+
+  if (explicit === false || explicit === 0 || explicit === "0") {
+    return 0;
+  }
+
+  const explicitMinutes = Number.parseInt(explicit, 10);
+
+  if (!Number.isNaN(explicitMinutes) && explicitMinutes > 0) {
+    return explicitMinutes;
+  }
+
+  const beforeMinutes = minutesBeforeValue(text);
+
+  if (beforeMinutes !== null) {
+    return beforeMinutes;
+  }
+
+  return 15;
 }
 
 function calendarSourceEvent({
@@ -2118,6 +2429,28 @@ app.delete("/api/calendar-events/:id", requireRole(...ADMIN_ROLES), (req, res) =
   deleteTableRow(res, "calendar_events", req.params.id);
 });
 
+function buildFallbackSchedulePlan(command) {
+  const startDate = parseDateTimeLike(command);
+  const title = inferMeetingTitle(command);
+  const durationMinutes = parseDurationMinutes(command);
+
+  return {
+    title,
+    description: command,
+    event_type: "meeting",
+    category: "Meetings",
+    start_at: startDate ? startDate.toISOString() : "",
+    end_at: startDate ? addMinutes(startDate, durationMinutes).toISOString() : "",
+    location: "",
+    create_meeting: true,
+    alarm_minutes_before: meetingAlarmMinutesBefore({}, command, Boolean(startDate)),
+    needs_clarification: startDate ? [] : ["start_at"],
+    summary: startDate
+      ? `Scheduled ${title}.`
+      : "I need a date and time before scheduling this meeting.",
+  };
+}
+
 app.post("/api/calendar/assistant", requireRole(...ADMIN_ROLES), async (req, res) => {
   try {
     const command = cleanText(req.body.command || req.body.message);
@@ -2127,7 +2460,10 @@ app.post("/api/calendar/assistant", requireRole(...ADMIN_ROLES), async (req, res
     }
 
     const existingEvents = await listRecentRows("calendar_events", 80);
-    const reply = await askAI(`
+    let parsed = null;
+
+    try {
+      const reply = await askAI(`
 You are the AI Schedule Assistant for Executive Virtual AI Assistant.
 Return JSON only. No markdown.
 Current date/time: ${new Date().toISOString()}
@@ -2155,7 +2491,29 @@ Return:
 
 If a required date/time is missing, put that field in needs_clarification.
     `);
-    const parsed = parseJsonObject(reply);
+      parsed = parseJsonObject(reply);
+    } catch (error) {
+      console.warn("Schedule AI parser fallback:", error);
+      parsed = buildFallbackSchedulePlan(command);
+    }
+
+    const fallbackParsed = buildFallbackSchedulePlan(command);
+    parsed = {
+      ...fallbackParsed,
+      ...parsed,
+      title: cleanText(parsed.title) || fallbackParsed.title,
+      description: cleanText(parsed.description) || fallbackParsed.description,
+      start_at: cleanText(parsed.start_at) || fallbackParsed.start_at,
+      end_at: cleanText(parsed.end_at) || fallbackParsed.end_at,
+      alarm_minutes_before:
+        parsed.alarm_minutes_before ?? fallbackParsed.alarm_minutes_before,
+      needs_clarification: fallbackParsed.start_at
+        ? []
+        : Array.isArray(parsed.needs_clarification) &&
+            parsed.needs_clarification.length > 0
+          ? parsed.needs_clarification
+          : fallbackParsed.needs_clarification,
+    };
     const missing = Array.isArray(parsed.needs_clarification)
       ? parsed.needs_clarification
       : [];
@@ -3502,6 +3860,8 @@ Supported action types:
 - task
 - general_ai
 
+Current date/time: ${new Date().toISOString()}
+
 Required JSON shape:
 {
   "summary": "Short summary of planned actions.",
@@ -3515,8 +3875,8 @@ Required JSON shape:
 }
 
 Data guidance:
-- meeting data: title, time, duration, location, briefing, risk, attendees.
-- alarm data: title, reminder_time, related_type, notes.
+- meeting data: title, time, start_at, end_at, duration, location, briefing, risk, attendees, alarm_minutes_before.
+- alarm data: title, reminder_time, due_at, related_type, notes.
 - operation_alert data: title, detail, severity, area, status.
 - email_draft data: title, recipient, subject, body, source_query, prompt.
 - report/briefing/general_ai data: prompt.
@@ -3527,6 +3887,8 @@ Rules:
 - Preserve every separate task in the user command.
 - Split comma-separated or "and" joined tasks into separate actions.
 - A time attached to a meeting is the meeting time, not a separate reminder.
+- When the user schedules a meeting with a date/time, include start_at as an ISO timestamp when possible.
+- Use the current date/time from the context to resolve today, tomorrow, and weekdays.
 - Only create alarm when the user explicitly asks to remind, set an alarm, or set a timed alert.
 - If the user says "set an alert/alarm/reminder for/at/by a time", use alarm.
 - If the user says "mark ... high risk", "repair", "issue", or "smart alert", use operation_alert.
@@ -4034,20 +4396,29 @@ async function executeCommandAction(action, req, context, createdRecords, comman
     }
 
     if (action.type === "meeting") {
-      const title = cleanText(action.data?.title) || action.title;
+      const actionData = action.data || {};
+      const title = cleanText(actionData.title) || action.title;
 
       if (!title) {
         return needsClarification(action, ["title"], "Meeting title is required.");
       }
 
+      const startDate = resolveMeetingStartDate(actionData, command);
+      const endDate = resolveMeetingEndDate(actionData, startDate);
+      const displayTime = startDate
+        ? formatDateTimeForMeeting(startDate)
+        : cleanText(actionData.time);
+      const duration = startDate && endDate
+        ? `${Math.max(15, Math.round((endDate - startDate) / 60_000))} minutes`
+        : cleanText(actionData.duration);
       const payload = {
         title,
-        time: cleanText(action.data?.time),
-        duration: cleanText(action.data?.duration),
-        location: cleanText(action.data?.location),
-        briefing: cleanText(action.data?.briefing) || command,
-        risk: cleanText(action.data?.risk),
-        attendees: parseAttendees(action.data?.attendees),
+        time: displayTime,
+        duration,
+        location: cleanText(actionData.location),
+        briefing: cleanText(actionData.briefing) || command,
+        risk: cleanText(actionData.risk),
+        attendees: parseAttendees(actionData.attendees),
       };
       const { row: meeting, reused } = await upsertCommandRecord(
         "meetings",
@@ -4059,9 +4430,71 @@ async function executeCommandAction(action, req, context, createdRecords, comman
       );
 
       createdRecords.meetings.push(meeting);
+
+      let event = null;
+      let alarm = null;
+
+      if (startDate) {
+        const eventResult = await safeUpsertOptionalCommandRecord(
+          "calendar_events",
+          {
+            title,
+            description: payload.briefing,
+            event_type: "meeting",
+            category: "Meetings",
+            start_at: startDate.toISOString(),
+            end_at: (endDate || addMinutes(startDate, 60)).toISOString(),
+            location: payload.location,
+            status: "Scheduled",
+            source_type: "meeting",
+            source_id: meeting.id,
+            created_by: getCurrentUserEmail(req),
+            metadata: {
+              command,
+              meeting_id: meeting.id,
+            },
+          },
+          {
+            title,
+            start_at: startDate.toISOString(),
+            source_type: "meeting",
+          }
+        );
+
+        event = eventResult.row;
+
+        if (event) {
+          createdRecords.calendarEvents.push(event);
+        }
+
+        const alarmMinutes = meetingAlarmMinutesBefore(actionData, command, true);
+
+        if (alarmMinutes > 0) {
+          const alarmAt = addMinutes(startDate, -alarmMinutes);
+          const alarmPayload = {
+            title: `${title} Reminder`,
+            reminder_time: `${alarmMinutes} minutes before ${title}`,
+            due_at: alarmAt.toISOString(),
+            related_type: "meeting",
+            related_id: meeting.id,
+            notes: command,
+            status: "Pending",
+            created_by: getCurrentUserEmail(req),
+          };
+          const alarmResult = await upsertCommandRecord("alarms", alarmPayload, {
+            title: alarmPayload.title,
+            due_at: alarmPayload.due_at,
+            created_by: alarmPayload.created_by,
+          });
+
+          alarm = alarmResult.row;
+          createdRecords.alarms.push(alarm);
+        }
+      }
+
       return reused
-        ? reusedAction(action, title, { meeting })
-        : completedAction(action, "created", title, { meeting });
+        ? reusedAction(action, title, { meeting, event, alarm })
+        : completedAction(action, "created", title, { meeting, event, alarm });
     }
 
     if (action.type === "alarm") {
@@ -4472,6 +4905,7 @@ app.post("/api/command", requireLogin, async (req, res) => {
     const plan = await planCommand(command, context);
     const createdRecords = {
       meetings: [],
+      calendarEvents: [],
       alarms: [],
       alerts: [],
       operationAlerts: [],

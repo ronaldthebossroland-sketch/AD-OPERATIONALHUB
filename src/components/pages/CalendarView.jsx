@@ -13,6 +13,7 @@ import {
   getCalendarEvents,
   runScheduleAssistant,
 } from "../../services/api";
+import { scheduleDeviceReminder } from "../../services/mobileCapabilities";
 import SectionHeader from "../shared/SectionHeader";
 import StatusPill from "../shared/StatusPill";
 import { Button } from "../ui/button";
@@ -263,6 +264,11 @@ export default function CalendarView({ setMeetings, setReminders }) {
       }
       if (data.alarm) {
         setReminders?.((previous) => [data.alarm, ...previous]);
+        scheduleDeviceReminder(data.alarm, { setNativeAlarm: true }).catch(
+          (error) => {
+            console.warn("Could not schedule device reminder:", error);
+          }
+        );
       }
       setAssistantCommand("");
       setAssistantResult(data);

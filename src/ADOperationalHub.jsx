@@ -38,6 +38,10 @@ import {
   signOutSupabaseAuth,
   syncSupabaseAuthSession,
 } from "./services/oauth";
+import {
+  scheduleDeviceReminder,
+  syncDeviceReminders,
+} from "./services/mobileCapabilities";
 
 const viewAccess = {
   dashboard: ["Super Admin", "Admin", "Viewer"],
@@ -295,6 +299,14 @@ export default function ADOperationalHub() {
   }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    syncDeviceReminders(reminders);
+  }, [currentUser, reminders]);
+
+  useEffect(() => {
     if (mainScrollRef.current) {
       mainScrollRef.current.scrollTop = 0;
     }
@@ -338,6 +350,9 @@ export default function ADOperationalHub() {
     });
 
     if (data.ok && data.alarm) {
+      scheduleDeviceReminder(data.alarm, { setNativeAlarm: true }).catch((error) => {
+        console.warn("Could not schedule device reminder:", error);
+      });
       setReminders((previous) =>
         previous.map((reminder) =>
           reminder.id === data.alarm.id ? data.alarm : reminder
@@ -368,6 +383,9 @@ export default function ADOperationalHub() {
     });
 
     if (data.ok && data.alarm) {
+      scheduleDeviceReminder(data.alarm, { setNativeAlarm: true }).catch((error) => {
+        console.warn("Could not schedule device reminder:", error);
+      });
       setReminders((previous) =>
         previous.map((reminder) =>
           reminder.id === data.alarm.id ? data.alarm : reminder
@@ -384,6 +402,9 @@ export default function ADOperationalHub() {
     const data = await updateAlarm(notification.recordId, updates);
 
     if (data.ok && data.alarm) {
+      scheduleDeviceReminder(data.alarm, { setNativeAlarm: true }).catch((error) => {
+        console.warn("Could not schedule device reminder:", error);
+      });
       setReminders((previous) =>
         previous.map((reminder) =>
           reminder.id === data.alarm.id ? data.alarm : reminder
