@@ -52,6 +52,16 @@ const viewAccess = {
   settings: ["Super Admin"],
 };
 
+function getInitialActiveView() {
+  if (typeof window === "undefined") {
+    return "dashboard";
+  }
+
+  const requestedView = new URLSearchParams(window.location.search).get("view");
+
+  return viewAccess[requestedView] ? requestedView : "dashboard";
+}
+
 function canAccessView(user, view) {
   if (!user) {
     return false;
@@ -80,7 +90,7 @@ function AccessRestricted({ currentUser }) {
 export default function ADOperationalHub() {
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
-  const [activeView, setActiveView] = useState("dashboard");
+  const [activeView, setActiveView] = useState(getInitialActiveView);
   const [meetings, setMeetings] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [reminders, setReminders] = useState([]);
@@ -132,6 +142,16 @@ export default function ADOperationalHub() {
   useEffect(() => {
     let isMounted = true;
     let removeOAuthDeepLinkHandler = () => {};
+
+    if (
+      typeof window !== "undefined" &&
+      window.history?.replaceState &&
+      window.location.pathname === "/" &&
+      (window.location.search.includes("view=") ||
+        window.location.search.includes("gmail="))
+    ) {
+      window.history.replaceState({}, document.title, "/");
+    }
 
     registerOAuthDeepLinkHandler((user) => {
       if (isMounted) {

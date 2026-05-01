@@ -2,7 +2,7 @@ import { App } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Capacitor } from "@capacitor/core";
 
-import { loginWithSupabaseToken } from "./api";
+import { API_BASE_URL, APP_HOME_URL, loginWithSupabaseToken } from "./api";
 import {
   isSupabaseAuthConfigured,
   supabase,
@@ -247,5 +247,19 @@ export async function signOutSupabaseAuth() {
 }
 
 export async function connectGmailWithGoogle() {
-  return signInWithGoogle();
+  const returnTo = `${APP_HOME_URL}/?view=emails&gmail=connected`;
+  const url = `${API_BASE_URL}/auth/gmail?returnTo=${encodeURIComponent(
+    returnTo
+  )}`;
+
+  if (Capacitor.isNativePlatform()) {
+    await Browser.open({
+      presentationStyle: "fullscreen",
+      url,
+      windowName: "_self",
+    });
+    return;
+  }
+
+  window.location.assign(url);
 }

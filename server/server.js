@@ -16,14 +16,18 @@ const { supabaseAdmin } = await import("./supabaseClient.js");
 const app = express();
 const httpServer = createServer(app);
 const PORT = Number.parseInt(process.env.PORT || "5000", 10);
+const PRODUCTION_APP_HOME_URL = "https://ad-operationalhub-seven.vercel.app";
+const LOCAL_APP_HOME_URL = "http://localhost:5173";
 const APP_HOME_URL = (
   process.env.APP_HOME_URL ||
   process.env.CLIENT_ORIGIN ||
-  "http://localhost:5173"
+  (process.env.NODE_ENV === "production"
+    ? PRODUCTION_APP_HOME_URL
+    : LOCAL_APP_HOME_URL)
 ).replace(/\/+$/, "");
 const DEFAULT_APP_ORIGINS = [
-  "https://ad-operationalhub-seven.vercel.app",
-  "http://localhost:5173",
+  PRODUCTION_APP_HOME_URL,
+  LOCAL_APP_HOME_URL,
   "http://localhost",
   "capacitor://localhost",
 ];
@@ -643,6 +647,66 @@ function encodeBase64Url(value) {
     .replace(/=+$/g, "");
 }
 
+function decodeBase64Url(value) {
+  const normalizedValue = String(value || "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  const padding = "=".repeat((4 - (normalizedValue.length % 4)) % 4);
+
+  return Buffer.from(`${normalizedValue}${padding}`, "base64").toString("utf8");
+}
+
+function encodeOAuthState(payload) {
+  return encodeBase64Url(JSON.stringify(payload));
+}
+
+function decodeOAuthState(value) {
+  if (!value) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(decodeBase64Url(value));
+
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isAllowedAppReturnUrl(url) {
+  try {
+    const parsedUrl = new URL(url);
+    const normalizedOrigin = parsedUrl.origin.replace(/\/+$/, "");
+
+    return (
+      ALLOWED_ORIGINS.includes(normalizedOrigin) ||
+      VERCEL_DEPLOYMENT_ORIGIN_PATTERN.test(normalizedOrigin)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getSafeAppReturnUrl(value, fallbackPath = "/") {
+  const fallbackUrl = `${APP_HOME_URL}${fallbackPath}`;
+  const requestedUrl = cleanText(value);
+
+  if (!requestedUrl) {
+    return fallbackUrl;
+  }
+
+  try {
+    const parsedUrl = new URL(requestedUrl, APP_HOME_URL);
+
+    return isAllowedAppReturnUrl(parsedUrl.toString())
+      ? parsedUrl.toString()
+      : fallbackUrl;
+  } catch {
+    return fallbackUrl;
+  }
+}
+
 function parseDateLike(value) {
   if (!value) {
     return null;
@@ -811,32 +875,50 @@ function calendarSourceEvent({
 }
 
 /* =========================
-   GOOGLE LOGIN + GMAIL CONNECT
+   GMAIL CONNECT
 ========================= */
 
-app.get("/auth/google", (req, res) => {
+function startGmailOAuth(req, res) {
   try {
     const oauth2Client = createGoogleClient();
+    const returnTo = getSafeAppReturnUrl(
+      req.query.returnTo,
+      "/?view=emails&gmail=connected"
+    );
 
     const url = oauth2Client.generateAuthUrl({
       access_type: "offline",
       include_granted_scopes: true,
-      prompt: "consent",
+      prompt: "consent select_account",
       scope: [
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
       ],
+      state: encodeOAuthState({
+        flow: "gmail",
+        returnTo,
+      }),
     });
 
     res.redirect(url);
   } catch (error) {
-    console.error("Google auth error:", error);
-    res.status(500).send("Could not start Google login.");
+    console.error("Gmail auth error:", error);
+    res.status(500).send("Could not start Gmail connection.");
   }
-});
+}
+
+app.get("/auth/gmail", startGmailOAuth);
+
+app.get("/auth/google", startGmailOAuth);
 
 app.get("/auth/google/callback", async (req, res) => {
+  const state = decodeOAuthState(req.query.state);
+  const returnTo = getSafeAppReturnUrl(
+    state.returnTo,
+    state.flow === "gmail" ? "/?view=emails&gmail=connected" : "/"
+  );
+
   try {
     const { code, error, error_description: errorDescription } = req.query;
 
@@ -876,9 +958,17 @@ app.get("/auth/google/callback", async (req, res) => {
     }
 
     req.session.tokens = tokens;
-    setSessionUser(req, user);
 
-    res.redirect(APP_HOME_URL);
+    if (state.flow === "gmail" && req.session.user?.email) {
+      req.session.gmail = {
+        connectedEmail: profile.email,
+        connectedAt: new Date().toISOString(),
+      };
+    } else {
+      setSessionUser(req, user);
+    }
+
+    res.redirect(returnTo);
   } catch (error) {
     console.error("Google callback error:", error);
     sendGoogleError(res, error);
