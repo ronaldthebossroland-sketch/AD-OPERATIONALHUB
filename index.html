@@ -11,6 +11,144 @@
     <meta name="apple-mobile-web-app-title" content="Executive AI" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Executive Virtual AI Assistant</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-width: 0;
+        min-height: 100%;
+        background: #020617;
+      }
+
+      .initial-splash {
+        position: relative;
+        display: grid;
+        min-height: 100vh;
+        min-height: 100dvh;
+        place-items: center;
+        overflow: hidden;
+        background:
+          linear-gradient(135deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.98) 48%, rgba(3, 7, 18, 1)),
+          #020617;
+        color: #f8fafc;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: center;
+      }
+
+      .initial-splash::before {
+        position: absolute;
+        inset: -22%;
+        content: "";
+        background:
+          linear-gradient(115deg, transparent 16%, rgba(216, 175, 85, 0.18) 34%, transparent 47%),
+          linear-gradient(295deg, transparent 22%, rgba(34, 211, 238, 0.14) 43%, transparent 56%);
+        animation: initial-splash-sheen 6s ease-in-out infinite;
+      }
+
+      .initial-splash__stage {
+        position: relative;
+        display: grid;
+        width: min(92vw, 520px);
+        justify-items: center;
+        gap: 22px;
+        padding: 32px 20px;
+      }
+
+      .initial-splash__logo-wrap {
+        position: relative;
+        display: grid;
+        height: clamp(164px, 28vw, 228px);
+        width: clamp(164px, 28vw, 228px);
+        place-items: center;
+      }
+
+      .initial-splash__logo-wrap::before,
+      .initial-splash__logo-wrap::after {
+        position: absolute;
+        border-radius: 999px;
+        content: "";
+      }
+
+      .initial-splash__logo-wrap::before {
+        inset: 14px;
+        border: 1px solid rgba(216, 175, 85, 0.55);
+        border-top-color: rgba(255, 248, 212, 0.95);
+        animation: initial-splash-spin 8s linear infinite;
+      }
+
+      .initial-splash__logo-wrap::after {
+        inset: 34px;
+        border: 1px solid rgba(34, 211, 238, 0.38);
+        border-right-color: rgba(165, 243, 252, 0.95);
+        animation: initial-splash-spin 6.5s linear infinite reverse;
+      }
+
+      .initial-splash img {
+        position: relative;
+        height: clamp(104px, 18vw, 148px);
+        width: clamp(104px, 18vw, 148px);
+        border-radius: 32px;
+        filter:
+          drop-shadow(0 24px 40px rgba(0, 0, 0, 0.42))
+          drop-shadow(0 0 20px rgba(216, 175, 85, 0.22));
+        animation: initial-splash-pulse 2.6s ease-in-out infinite;
+      }
+
+      .initial-splash h1 {
+        margin: 0;
+        max-width: 12em;
+        color: #ffffff;
+        font-size: clamp(1.72rem, 5vw, 3rem);
+        font-weight: 950;
+        line-height: 1.04;
+      }
+
+      .initial-splash p {
+        margin: 0;
+        color: #cbd5e1;
+        font-size: clamp(0.95rem, 2.7vw, 1.08rem);
+        font-weight: 700;
+        line-height: 1.6;
+      }
+
+      @keyframes initial-splash-sheen {
+        0%,
+        100% {
+          transform: translate3d(-2%, -1%, 0) scale(1);
+        }
+
+        50% {
+          transform: translate3d(2%, 1%, 0) scale(1.04);
+        }
+      }
+
+      @keyframes initial-splash-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes initial-splash-pulse {
+        0%,
+        100% {
+          transform: translateY(0) scale(0.98);
+        }
+
+        50% {
+          transform: translateY(-4px) scale(1);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .initial-splash::before,
+        .initial-splash__logo-wrap::before,
+        .initial-splash__logo-wrap::after,
+        .initial-splash img {
+          animation: none;
+        }
+      }
+    </style>
     <script>
       (() => {
         if (!("serviceWorker" in navigator)) {
@@ -45,7 +183,17 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="initial-splash" role="status" aria-live="polite">
+        <div class="initial-splash__stage">
+          <div class="initial-splash__logo-wrap">
+            <img src="/logo-mark.svg" alt="" aria-hidden="true" />
+          </div>
+          <h1>Executive Virtual AI Assistant</h1>
+          <p>Preparing your executive workspace</p>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

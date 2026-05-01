@@ -6,6 +6,7 @@ import AuthCallbackPage from "./components/auth/AuthCallbackPage";
 import LoginPage from "./components/auth/LoginPage";
 import Header from "./components/layout/Header";
 import Sidebar from "./components/layout/Sidebar";
+import AppSplashScreen from "./components/shared/AppSplashScreen";
 import ApprovalCenterView from "./components/pages/ApprovalCenterView";
 import CalendarView from "./components/pages/CalendarView";
 import DashboardView from "./components/pages/DashboardView";
@@ -89,6 +90,7 @@ function AccessRestricted({ currentUser }) {
 
 export default function ADOperationalHub() {
   const [authLoading, setAuthLoading] = useState(true);
+  const [introComplete, setIntroComplete] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [activeView, setActiveView] = useState(getInitialActiveView);
   const [meetings, setMeetings] = useState([]);
@@ -124,6 +126,14 @@ export default function ADOperationalHub() {
   const isAuthCallbackPath =
     typeof window !== "undefined" &&
     window.location.pathname === "/auth/callback";
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setIntroComplete(true);
+    }, 1100);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const handleAuthComplete = useCallback((user) => {
     setCurrentUser(user);
@@ -517,15 +527,19 @@ export default function ADOperationalHub() {
     }
   };
 
-  if (authLoading) {
+  if (authLoading || !introComplete) {
     if (isAuthCallbackPath) {
       return <AuthCallbackPage onAuthenticated={handleAuthComplete} />;
     }
 
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm font-bold text-slate-500">
-        Loading Executive Virtual AI Assistant...
-      </div>
+      <AppSplashScreen
+        message={
+          authLoading
+            ? "Preparing your executive workspace"
+            : "Opening your command center"
+        }
+      />
     );
   }
 

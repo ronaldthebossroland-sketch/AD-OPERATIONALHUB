@@ -407,7 +407,7 @@ function drawMark(buffer, width, size, offset = 0, multiplier = 1) {
   );
 }
 
-function render(size, mode = "tile") {
+function renderPixels(size, mode = "tile") {
   const workSize = size * ss;
   const buffer = Buffer.alloc(workSize * workSize * 4);
   const tileLeft = 34;
@@ -474,7 +474,114 @@ function render(size, mode = "tile") {
     }
   }
 
-  return png(size, size, output);
+  return output;
+}
+
+function render(size, mode = "tile") {
+  return png(size, size, renderPixels(size, mode));
+}
+
+function compositePixels(target, targetWidth, source, sourceWidth, sourceHeight, left, top) {
+  for (let y = 0; y < sourceHeight; y += 1) {
+    const targetY = top + y;
+
+    if (targetY < 0) {
+      continue;
+    }
+
+    for (let x = 0; x < sourceWidth; x += 1) {
+      const targetX = left + x;
+
+      if (targetX < 0 || targetX >= targetWidth) {
+        continue;
+      }
+
+      const sourceIndex = (y * sourceWidth + x) * 4;
+      const alpha = source[sourceIndex + 3];
+
+      if (!alpha) {
+        continue;
+      }
+
+      blendPixel(target, targetWidth, targetX, targetY, [
+        source[sourceIndex],
+        source[sourceIndex + 1],
+        source[sourceIndex + 2],
+        alpha,
+      ]);
+    }
+  }
+}
+
+function drawHorizontalLine(buffer, width, height, cx, cy, length, thickness, rgba) {
+  const startX = Math.max(0, Math.floor(cx - length / 2));
+  const endX = Math.min(width - 1, Math.ceil(cx + length / 2));
+  const startY = Math.max(0, Math.floor(cy - thickness / 2));
+  const endY = Math.min(height - 1, Math.ceil(cy + thickness / 2));
+
+  for (let y = startY; y <= endY; y += 1) {
+    for (let x = startX; x <= endX; x += 1) {
+      const centerFade = Math.max(0, 1 - Math.abs(x - cx) / (length / 2));
+      const edgeFade = Math.max(0, 1 - Math.abs(y - cy) / (thickness / 2 || 1));
+
+      blendPixel(buffer, width, x, y, [
+        rgba[0],
+        rgba[1],
+        rgba[2],
+        Math.round(rgba[3] * centerFade * edgeFade),
+      ]);
+    }
+  }
+}
+
+function renderSplash(width, height) {
+  const buffer = Buffer.alloc(width * height * 4);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const nx = width === 1 ? 0 : x / (width - 1);
+      const ny = height === 1 ? 0 : y / (height - 1);
+      const depth = Math.min(1, Math.max(0, nx * 0.44 + ny * 0.56));
+      const diagonal = Math.max(0, 1 - Math.abs(nx - ny - 0.08) / 0.18);
+      const cyanSheen = Math.max(0, 1 - Math.abs(nx + ny - 1.12) / 0.2);
+      const vignette = Math.min(1, Math.hypot(nx - 0.5, ny - 0.47) / 0.72);
+      const index = (y * width + x) * 4;
+
+      buffer[index] = Math.max(
+        1,
+        Math.round(mix(2, 15, depth) + diagonal * 18 - vignette * 8)
+      );
+      buffer[index + 1] = Math.max(
+        5,
+        Math.round(mix(6, 23, depth) + diagonal * 15 + cyanSheen * 16 - vignette * 8)
+      );
+      buffer[index + 2] = Math.max(
+        20,
+        Math.round(mix(23, 42, depth) + diagonal * 8 + cyanSheen * 28 - vignette * 8)
+      );
+      buffer[index + 3] = 255;
+    }
+  }
+
+  const markSize = Math.max(108, Math.round(Math.min(width, height) * 0.36));
+  const markPixels = renderPixels(markSize);
+  const markLeft = Math.round((width - markSize) / 2);
+  const markTop = Math.round((height - markSize) / 2 - height * 0.035);
+  const lineY = Math.round(markTop + markSize + Math.max(26, height * 0.035));
+
+  compositePixels(buffer, width, markPixels, markSize, markSize, markLeft, markTop);
+  drawHorizontalLine(
+    buffer,
+    width,
+    height,
+    Math.round(width / 2),
+    lineY,
+    Math.min(width * 0.3, markSize * 1.25),
+    Math.max(4, Math.round(Math.min(width, height) * 0.006)),
+    color("#d8af55", 210)
+  );
+
+  return buffer;
 }
 
 function save(relativePath, size, mode = "tile") {
@@ -482,6 +589,13 @@ function save(relativePath, size, mode = "tile") {
 
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, render(size, mode));
+}
+
+function saveSplash(relativePath, width, height) {
+  const target = join(root, relativePath);
+
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, png(width, height, renderSplash(width, height)));
 }
 
 save("public/icons/icon-512.png", 512);
@@ -507,4 +621,26 @@ for (const [density, size] of [
   ["xxxhdpi", 432],
 ]) {
   save(`android/app/src/main/res/mipmap-${density}/ic_launcher_foreground.png`, size, "foreground");
+}
+
+saveSplash("android/app/src/main/res/drawable/splash.png", 480, 320);
+
+for (const [density, width, height] of [
+  ["mdpi", 480, 320],
+  ["hdpi", 800, 480],
+  ["xhdpi", 1280, 720],
+  ["xxhdpi", 1600, 960],
+  ["xxxhdpi", 1920, 1280],
+]) {
+  saveSplash(`android/app/src/main/res/drawable-land-${density}/splash.png`, width, height);
+}
+
+for (const [density, width, height] of [
+  ["mdpi", 320, 480],
+  ["hdpi", 480, 800],
+  ["xhdpi", 720, 1280],
+  ["xxhdpi", 960, 1600],
+  ["xxxhdpi", 1280, 1920],
+]) {
+  saveSplash(`android/app/src/main/res/drawable-port-${density}/splash.png`, width, height);
 }
