@@ -6,6 +6,7 @@ import { API_BASE_URL, loginWithSupabaseToken } from "./api";
 import {
   isSupabaseAuthConfigured,
   supabase,
+  SUPABASE_LOCAL_REDIRECT_URL,
   SUPABASE_NATIVE_REDIRECT_URL,
   SUPABASE_WEB_REDIRECT_URL,
 } from "./supabaseClient";
@@ -19,8 +20,12 @@ function ensureSupabaseAuth() {
 }
 
 function getOAuthRedirectUrl() {
-  return Capacitor.isNativePlatform()
-    ? SUPABASE_NATIVE_REDIRECT_URL
+  if (Capacitor.isNativePlatform()) {
+    return SUPABASE_NATIVE_REDIRECT_URL;
+  }
+
+  return import.meta.env.DEV
+    ? SUPABASE_LOCAL_REDIRECT_URL
     : SUPABASE_WEB_REDIRECT_URL;
 }
 
@@ -64,7 +69,9 @@ function isOAuthReturnUrl(url) {
     const { parsedUrl } = readAuthParams(url);
     const isNativeReturn =
       parsedUrl.protocol === "capacitor:" && parsedUrl.host === "localhost";
-    const isWebReturn = parsedUrl.href.startsWith(SUPABASE_WEB_REDIRECT_URL);
+    const isWebReturn =
+      parsedUrl.href.startsWith(SUPABASE_WEB_REDIRECT_URL) ||
+      parsedUrl.href.startsWith(SUPABASE_LOCAL_REDIRECT_URL);
 
     return isNativeReturn || isWebReturn || hasAuthParams(url);
   } catch {
@@ -77,7 +84,7 @@ function cleanCurrentUrl() {
     return;
   }
 
-  window.history.replaceState({}, document.title, window.location.pathname || "/");
+  window.history.replaceState({}, document.title, "/");
 }
 
 async function syncAppSessionFromSupabase() {
