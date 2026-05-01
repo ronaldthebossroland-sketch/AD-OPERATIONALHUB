@@ -4,6 +4,7 @@ const CHECK_INTERVAL_MS = 30_000;
 const MINUTE_MS = 60_000;
 const RECENT_OVERDUE_MS = 24 * 60 * 60 * 1000;
 const AMBIGUOUS_TIME_PAST_GRACE_MS = 2 * 60 * 60 * 1000;
+const DISMISSED_STORAGE_KEY = "adHubDismissedMissionControlAlerts";
 
 const stageOrder = {
   overdue: 0,
@@ -386,6 +387,37 @@ function speak(text) {
   window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
 }
 
+function loadDismissedNotifications() {
+  if (typeof window === "undefined") {
+    return new Set();
+  }
+
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(DISMISSED_STORAGE_KEY) || "[]"
+    );
+
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDismissedNotifications(dismissed) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      DISMISSED_STORAGE_KEY,
+      JSON.stringify([...dismissed].slice(-250))
+    );
+  } catch {
+    // Local storage can be unavailable in private browsing; dismissal still works in memory.
+  }
+}
+
 export default function useSmartAlarms({
   alerts = [],
   meetings = [],
@@ -398,7 +430,7 @@ export default function useSmartAlarms({
   onTrigger,
 } = {}) {
   const [activeNotification, setActiveNotification] = useState(null);
-  const [dismissed, setDismissed] = useState(() => new Set());
+  const [dismissed, setDismissed] = useState(loadDismissedNotifications);
   const [modalCooldowns, setModalCooldowns] = useState({});
   const [tick, setTick] = useState(() => Date.now());
   const spokenKeysRef = useRef(new Set());
@@ -433,6 +465,10 @@ export default function useSmartAlarms({
       }),
     [dismissed, modalCooldowns, notifications, tick]
   );
+
+  useEffect(() => {
+    saveDismissedNotifications(dismissed);
+  }, [dismissed]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -543,8 +579,8 @@ export default function useSmartAlarms({
   }
 
   async function markDone(notification) {
-    await onMarkDone?.(notification);
     dismiss(notification);
+    await onMarkDone?.(notification);
   }
 
   async function reschedule(notification, nextDate) {

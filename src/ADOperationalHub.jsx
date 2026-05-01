@@ -26,6 +26,7 @@ import {
   getAlerts,
   getCurrentUser,
   getMeetings,
+  updateMeeting,
   getOperations,
   getPartners,
   getProjects,
@@ -40,6 +41,7 @@ import {
   syncSupabaseAuthSession,
 } from "./services/oauth";
 import {
+  cancelDeviceReminder,
   scheduleDeviceReminder,
   syncDeviceReminders,
 } from "./services/mobileCapabilities";
@@ -434,14 +436,57 @@ export default function ADOperationalHub() {
 
   async function handleMissionControlDone(notification) {
     if (notification.kind === "alarm") {
+      const currentReminder = reminders.find(
+        (reminder) => reminder.id === notification.recordId
+      );
+      const completedReminder = {
+        ...(currentReminder || {}),
+        id: notification.recordId,
+        status: "Completed",
+        snoozed_until: null,
+      };
+
+      setReminders((previous) =>
+        previous.map((reminder) =>
+          reminder.id === notification.recordId ? completedReminder : reminder
+        )
+      );
+      cancelDeviceReminder(currentReminder || completedReminder).catch((error) => {
+        console.warn("Could not cancel device reminder:", error);
+      });
+
       const data = await updateAlarm(notification.recordId, {
         status: "Completed",
+        snoozed_until: null,
       });
 
       if (data.ok && data.alarm) {
         setReminders((previous) =>
           previous.map((reminder) =>
             reminder.id === data.alarm.id ? data.alarm : reminder
+          )
+        );
+      }
+      return;
+    }
+
+    if (notification.kind === "meeting") {
+      setMeetings((previous) =>
+        previous.map((meeting) =>
+          meeting.id === notification.recordId
+            ? { ...meeting, status: "Completed" }
+            : meeting
+        )
+      );
+
+      const data = await updateMeeting(notification.recordId, {
+        status: "Completed",
+      });
+
+      if (data.ok && data.meeting) {
+        setMeetings((previous) =>
+          previous.map((meeting) =>
+            meeting.id === data.meeting.id ? data.meeting : meeting
           )
         );
       }
@@ -490,6 +535,7 @@ export default function ADOperationalHub() {
             setAlerts={setAlerts}
             setMeetings={setMeetings}
             setOperations={setOperations}
+            setPartners={setPartners}
             setReminders={setReminders}
             onNavigate={setActiveView}
             onStartTranscribing={startTranscribingFromCommand}

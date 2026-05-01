@@ -38,6 +38,7 @@ export default function VoiceHomeView({
   setAlerts,
   setMeetings,
   setOperations,
+  setPartners,
   setReminders,
 }) {
   function applyVoiceAction(action) {
@@ -77,6 +78,10 @@ export default function VoiceHomeView({
 
     if (action.type === "task" && data.operation) {
       setOperations?.((previous) => [data.operation, ...previous]);
+    }
+
+    if (action.type === "partner" && data.partner) {
+      setPartners?.((previous) => [data.partner, ...previous]);
     }
   }
 

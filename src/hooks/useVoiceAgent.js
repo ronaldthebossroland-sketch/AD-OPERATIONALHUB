@@ -62,6 +62,7 @@ export function actionTypeLabel(type) {
     transcript_summary: "Transcript Summary",
     briefing: "Briefing",
     task: "Task",
+    partner: "Partner",
     general_ai: "AI",
     transcription: "Transcription",
   };
@@ -128,7 +129,7 @@ function hasMeetingSchedulingIntent(command) {
 }
 
 function hasDateOrTime(text) {
-  return /\b(today|tomorrow|tonight|morning|afternoon|evening|noon|midnight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+\w+|this\s+\w+|at\s+\d{1,2}|by\s+\d{1,2}|for\s+\d{1,2}|\d{1,2}:\d{2}|\d{1,2}\s*(am|pm))\b/i.test(
+  return /\b(today|tomorrow|tonight|morning|afternoon|evening|noon|midnight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+\w+|this\s+\w+|in\s+(?:a|an|one|\d+)\s+(?:minute|minutes|hour|hours|day|days)|at\s+\d{1,2}|by\s+\d{1,2}|for\s+\d{1,2}|\d{1,2}:\d{2}|\d{1,2}\s*(am|pm))\b/i.test(
     text
   );
 }
@@ -163,6 +164,7 @@ function extractMeetingTimePhrase(text) {
     "today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\\s+\\w+|this\\s+\\w+";
   const clock = "\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?";
   const patterns = [
+    /\b(in\s+(?:a|an|one|\d+)\s+(?:minute|minutes|hour|hours|day|days))\b/i,
     new RegExp(`\\b((?:${dateWords})\\s+(?:at|by|around|for)?\\s*${clock})\\b`, "i"),
     new RegExp(`\\b((?:at|by|around|for)\\s+${clock}\\s*(?:${dateWords})?)\\b`, "i"),
     new RegExp(`\\b(${clock}\\s+(?:${dateWords}))\\b`, "i"),
@@ -184,12 +186,42 @@ function extractMeetingTimePhrase(text) {
 function extractReminderLead(text) {
   const cleanTextValue = cleanVoiceText(text);
 
+  if (/\b(a|one)\s+min(?:ute)?s?\s*(before|early|ahead|prior)?\b/i.test(cleanTextValue)) {
+    return "1 minute before";
+  }
+
   if (/\bhalf\s+(an\s+)?hour\b/i.test(cleanTextValue)) {
     return "30 minutes before";
   }
 
   if (/\b(an|one)\s+hour\b/i.test(cleanTextValue)) {
     return "1 hour before";
+  }
+
+  const wordNumberMatch = cleanTextValue.match(
+    /\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(minutes?|mins?|hours?|hrs?|days?)\s*(before|early|ahead|prior)?\b/i
+  );
+  const wordNumbers = {
+    two: "2",
+    three: "3",
+    four: "4",
+    five: "5",
+    six: "6",
+    seven: "7",
+    eight: "8",
+    nine: "9",
+    ten: "10",
+    eleven: "11",
+    twelve: "12",
+  };
+
+  if (wordNumberMatch) {
+    const unit = wordNumberMatch[2]
+      .toLowerCase()
+      .replace(/^mins?$/, "minutes")
+      .replace(/^hrs?$/, "hours");
+
+    return `${wordNumbers[wordNumberMatch[1].toLowerCase()]} ${unit} before`;
   }
 
   const match = cleanTextValue.match(
@@ -215,7 +247,12 @@ function getReminderPreference(text) {
   const lead = extractReminderLead(text);
 
   if (lead || /\b(yes|yeah|yep|sure|please|remind|reminder|alarm|alert)\b/i.test(text)) {
-    return { wantsReminder: true, lead };
+    return {
+      wantsReminder: true,
+      lead:
+        lead ||
+        (hasDateOrTime(text) ? `at ${extractMeetingTimePhrase(text)}` : ""),
+    };
   }
 
   return { wantsReminder: null, lead: "" };
@@ -295,16 +332,21 @@ function updateMeetingConversation(conversation, reply) {
 
   if (conversation.asking === "reminder") {
     const preference = getReminderPreference(cleanReply);
+    const absoluteReminderTime = hasDateOrTime(cleanReply)
+      ? extractMeetingTimePhrase(cleanReply)
+      : "";
 
-    if (preference.wantsReminder === null) {
+    if (preference.wantsReminder === null && !absoluteReminderTime) {
       return {
         conversation: nextConversation,
         question: "Should I add a reminder for this meeting?",
       };
     }
 
-    nextConversation.wantsReminder = preference.wantsReminder;
-    nextConversation.reminderLead = preference.lead;
+    nextConversation.wantsReminder =
+      preference.wantsReminder === null ? true : preference.wantsReminder;
+    nextConversation.reminderLead =
+      preference.lead || (absoluteReminderTime ? `at ${absoluteReminderTime}` : "");
   }
 
   if (conversation.asking === "reminderLead") {
@@ -313,15 +355,19 @@ function updateMeetingConversation(conversation, reply) {
       nextConversation.reminderLead = "";
     } else {
       const lead = extractReminderLead(cleanReply);
+      const absoluteReminderTime = hasDateOrTime(cleanReply)
+        ? extractMeetingTimePhrase(cleanReply)
+        : "";
 
-      if (!lead) {
+      if (!lead && !absoluteReminderTime) {
         return {
           conversation: nextConversation,
           question: "How long before the meeting should I remind you? For example, 15 minutes before.",
         };
       }
 
-      nextConversation.reminderLead = lead;
+      nextConversation.reminderLead =
+        lead || (absoluteReminderTime ? `at ${absoluteReminderTime}` : "");
     }
   }
 
@@ -342,11 +388,356 @@ function updateMeetingConversation(conversation, reply) {
 
 function buildMeetingConversationCommand(conversation) {
   const title = cleanVoiceText(conversation.title) || "New Meeting";
+  const reminderLead = cleanVoiceText(conversation.reminderLead);
+
+  if (conversation.wantsReminder && /^at\s+/i.test(reminderLead)) {
+    return [
+      `Schedule a meeting titled "${title}" for ${conversation.time} without reminder.`,
+      `Set a reminder titled "${title} Reminder" ${reminderLead} for that meeting.`,
+    ].join(" ");
+  }
+
   const reminderText = conversation.wantsReminder
-    ? ` with a reminder ${conversation.reminderLead}`
+    ? ` with a reminder ${reminderLead}`
     : " without reminder";
 
   return `Schedule a meeting titled "${title}" for ${conversation.time}${reminderText}.`;
+}
+
+function noOptionalValue(text) {
+  return (
+    isNegativeReply(text) ||
+    /\b(no|none|skip|leave it|not now|no deadline|no due date|no owner|no email|no phone)\b/i.test(
+      text
+    )
+  );
+}
+
+function extractPriority(text, fallback = "") {
+  if (/\b(high|urgent|critical|top priority)\b/i.test(text)) return "High";
+  if (/\b(low)\b/i.test(text)) return "Low";
+  if (/\b(medium|normal|standard)\b/i.test(text)) return "Medium";
+  return fallback;
+}
+
+function extractEmail(text) {
+  return cleanVoiceText(text).match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)?.[0] || "";
+}
+
+function extractPhone(text) {
+  return cleanVoiceText(text).match(/\+?\d[\d\s().-]{6,}\d/)?.[0]?.trim() || "";
+}
+
+function stripKnownTime(text) {
+  const time = extractMeetingTimePhrase(text);
+  return cleanVoiceText(text)
+    .replace(time, "")
+    .replace(/\b(?:today|tomorrow|tonight|by|at|for|around|due|deadline|in)\b\s*$/i, "")
+    .trim();
+}
+
+function hasStandaloneReminderIntent(command) {
+  return /\b(remind\s+me|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|set\s+(?:an?\s+)?alarm)\b/i.test(
+    command
+  );
+}
+
+function extractStandaloneReminderTitle(command) {
+  const text = stripKnownTime(command)
+    .replace(/\b(?:please|can you|could you|i want you to)\b/gi, "")
+    .replace(/\b(?:set|create|add)\s+(?:a|an)?\s*(?:reminder|alarm)\b/gi, "")
+    .replace(/\bremind\s+me\s+(?:to|about)?\b/gi, "")
+    .replace(/\b(?:for|at|by|in)\s*$/i, "")
+    .trim();
+
+  return /^(me|reminder|alarm|it)$/i.test(text) ? "" : text;
+}
+
+function createReminderConversation(command) {
+  return {
+    type: "reminder",
+    title: extractStandaloneReminderTitle(command),
+    time: hasDateOrTime(command) ? extractMeetingTimePhrase(command) : "",
+    asking: "",
+  };
+}
+
+function getNextReminderStep(conversation) {
+  if (!conversation.time) {
+    return { asking: "time", question: "What time should I remind you?" };
+  }
+
+  if (!conversation.title) {
+    return { asking: "title", question: "What should I remind you about?" };
+  }
+
+  return null;
+}
+
+function updateReminderConversation(conversation, reply) {
+  const nextConversation = { ...conversation };
+  const cleanReply = cleanVoiceText(reply);
+
+  if (conversation.asking === "time") {
+    if (!hasDateOrTime(cleanReply)) {
+      return {
+        conversation: nextConversation,
+        question: "What time should I remind you? You can say 12:10 or in 5 minutes.",
+      };
+    }
+
+    nextConversation.time = extractMeetingTimePhrase(cleanReply);
+  }
+
+  if (conversation.asking === "title") {
+    nextConversation.title = cleanReply;
+  }
+
+  const nextStep = getNextReminderStep(nextConversation);
+  return nextStep
+    ? {
+        conversation: { ...nextConversation, asking: nextStep.asking },
+        question: nextStep.question,
+      }
+    : { conversation: nextConversation, question: "" };
+}
+
+function buildReminderConversationCommand(conversation) {
+  return `Set a reminder titled "${conversation.title}" for ${conversation.time}.`;
+}
+
+function hasTaskIntent(command) {
+  return /\b(create|add|make|set up)\b.*\b(task|todo|to do|action item)\b/i.test(command);
+}
+
+function extractTaskTitle(command) {
+  const match = cleanVoiceText(command).match(
+    /\b(?:task|todo|to do|action item)\s+(?:to|for|called|titled)?\s*(.+?)(?:\s+(?:by|due|deadline|priority|owner)\b|[,.;]|$)/i
+  );
+  const title = cleanVoiceText(match?.[1])
+    .replace(/^(to|for)\s+/i, "")
+    .trim();
+
+  return /^(a|new|task|todo|to do|it)$/i.test(title) ? "" : title;
+}
+
+function createTaskConversation(command) {
+  return {
+    type: "task",
+    title: extractTaskTitle(command),
+    deadline: hasDateOrTime(command) ? extractMeetingTimePhrase(command) : null,
+    priority: extractPriority(command),
+    asking: "",
+  };
+}
+
+function getNextTaskStep(conversation) {
+  if (!conversation.title) {
+    return { asking: "title", question: "What task should I create?" };
+  }
+
+  if (conversation.deadline === undefined || conversation.deadline === null) {
+    return { asking: "deadline", question: "When is it due? You can say no deadline." };
+  }
+
+  if (!conversation.priority) {
+    return { asking: "priority", question: "What priority should I use: high, medium, or low?" };
+  }
+
+  return null;
+}
+
+function updateTaskConversation(conversation, reply) {
+  const nextConversation = { ...conversation };
+  const cleanReply = cleanVoiceText(reply);
+
+  if (conversation.asking === "title") {
+    nextConversation.title = cleanReply;
+  }
+
+  if (conversation.asking === "deadline") {
+    nextConversation.deadline = noOptionalValue(cleanReply)
+      ? ""
+      : hasDateOrTime(cleanReply)
+        ? extractMeetingTimePhrase(cleanReply)
+        : cleanReply;
+  }
+
+  if (conversation.asking === "priority") {
+    nextConversation.priority = extractPriority(cleanReply, "Medium");
+  }
+
+  const nextStep = getNextTaskStep(nextConversation);
+  return nextStep
+    ? {
+        conversation: { ...nextConversation, asking: nextStep.asking },
+        question: nextStep.question,
+      }
+    : { conversation: nextConversation, question: "" };
+}
+
+function buildTaskConversationCommand(conversation) {
+  return [
+    `Create a task titled "${conversation.title}".`,
+    conversation.deadline ? `Deadline: ${conversation.deadline}.` : "No deadline.",
+    `Priority: ${conversation.priority || "Medium"}.`,
+  ].join(" ");
+}
+
+function hasOperationIntent(command) {
+  return /\b(create|add|raise|log|mark)\b.*\b(operation|alert|risk|issue|repair|incident|outage)\b/i.test(command);
+}
+
+function extractOperationTitle(command) {
+  const match = cleanVoiceText(command).match(
+    /\b(?:operation|alert|risk|issue|repair|incident|outage)\s+(?:for|about|called|titled)?\s*(.+?)(?:\s+(?:severity|priority|level|due|by|area)\b|[,.;]|$)/i
+  );
+
+  return cleanVoiceText(match?.[1]).replace(/^(for|about)\s+/i, "");
+}
+
+function createOperationConversation(command) {
+  return {
+    type: "operation",
+    title: extractOperationTitle(command),
+    severity: extractPriority(command),
+    due: hasDateOrTime(command) ? extractMeetingTimePhrase(command) : null,
+    asking: "",
+  };
+}
+
+function getNextOperationStep(conversation) {
+  if (!conversation.title) {
+    return { asking: "title", question: "What operation, risk, or issue should I log?" };
+  }
+
+  if (!conversation.severity) {
+    return { asking: "severity", question: "How severe is it: high, medium, or low?" };
+  }
+
+  if (conversation.due === undefined || conversation.due === null) {
+    return { asking: "due", question: "When does it need attention? You can say no deadline." };
+  }
+
+  return null;
+}
+
+function updateOperationConversation(conversation, reply) {
+  const nextConversation = { ...conversation };
+  const cleanReply = cleanVoiceText(reply);
+
+  if (conversation.asking === "title") {
+    nextConversation.title = cleanReply;
+  }
+
+  if (conversation.asking === "severity") {
+    nextConversation.severity = extractPriority(cleanReply, "Medium");
+  }
+
+  if (conversation.asking === "due") {
+    nextConversation.due = noOptionalValue(cleanReply)
+      ? ""
+      : hasDateOrTime(cleanReply)
+        ? extractMeetingTimePhrase(cleanReply)
+        : cleanReply;
+  }
+
+  const nextStep = getNextOperationStep(nextConversation);
+  return nextStep
+    ? {
+        conversation: { ...nextConversation, asking: nextStep.asking },
+        question: nextStep.question,
+      }
+    : { conversation: nextConversation, question: "" };
+}
+
+function buildOperationConversationCommand(conversation) {
+  return [
+    `Create an operation alert titled "${conversation.title}".`,
+    `Severity: ${conversation.severity || "Medium"}.`,
+    conversation.due ? `Due: ${conversation.due}.` : "No deadline.",
+  ].join(" ");
+}
+
+function hasPartnerIntent(command) {
+  return /\b(create|add|save|register)\b.*\b(partner|vendor|sponsor|partnership)\b/i.test(command);
+}
+
+function extractPartnerName(command) {
+  const match = cleanVoiceText(command).match(
+    /\b(?:partner|vendor|sponsor|partnership)\s+(?:named|called|for|with)?\s*(.+?)(?:\s+(?:email|phone|next step|milestone)\b|[,.;]|$)/i
+  );
+
+  return cleanVoiceText(match?.[1]).replace(/^(named|called|for|with)\s+/i, "");
+}
+
+function createPartnerConversation(command) {
+  const email = extractEmail(command);
+
+  return {
+    type: "partner",
+    name: extractPartnerName(command),
+    email: email || null,
+    phone: extractPhone(command),
+    nextStep: null,
+    asking: "",
+  };
+}
+
+function getNextPartnerStep(conversation) {
+  if (!conversation.name) {
+    return { asking: "name", question: "What is the partner name?" };
+  }
+
+  if (conversation.email === undefined || conversation.email === null) {
+    return { asking: "email", question: "What email should I save for them? You can say no email." };
+  }
+
+  if (conversation.nextStep === undefined || conversation.nextStep === null) {
+    return { asking: "nextStep", question: "What is the next step with this partner? You can say no next step." };
+  }
+
+  return null;
+}
+
+function updatePartnerConversation(conversation, reply) {
+  const nextConversation = { ...conversation };
+  const cleanReply = cleanVoiceText(reply);
+
+  if (conversation.asking === "name") {
+    nextConversation.name = cleanReply;
+  }
+
+  if (conversation.asking === "email") {
+    nextConversation.email = noOptionalValue(cleanReply) ? "" : extractEmail(cleanReply) || cleanReply;
+  }
+
+  if (conversation.asking === "nextStep") {
+    nextConversation.nextStep = noOptionalValue(cleanReply) ? "" : cleanReply;
+  }
+
+  const nextStep = getNextPartnerStep(nextConversation);
+  return nextStep
+    ? {
+        conversation: { ...nextConversation, asking: nextStep.asking },
+        question: nextStep.question,
+      }
+    : { conversation: nextConversation, question: "" };
+}
+
+function buildPartnerConversationCommand(conversation) {
+  return [
+    `Create a partner named "${conversation.name}".`,
+    conversation.email ? `Email: ${conversation.email}.` : "No email.",
+    conversation.phone ? `Phone: ${conversation.phone}.` : "",
+    conversation.nextStep ? `Next step: ${conversation.nextStep}.` : "No next step.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function hasSoftTranscriptionIntent(command) {
+  return /\b(transcribe|transcription|record\s+(?:this\s+)?meeting|take\s+notes)\b/i.test(command);
 }
 
 function isSensitiveCommand(command) {
@@ -800,14 +1191,85 @@ export default function useVoiceAgent({
     }
   }
 
-  async function continueMeetingConversation(reply) {
+  function updatePendingConversation(conversation, reply) {
+    if (conversation.type === "meeting") {
+      return updateMeetingConversation(conversation, reply);
+    }
+
+    if (conversation.type === "reminder") {
+      return updateReminderConversation(conversation, reply);
+    }
+
+    if (conversation.type === "task") {
+      return updateTaskConversation(conversation, reply);
+    }
+
+    if (conversation.type === "operation") {
+      return updateOperationConversation(conversation, reply);
+    }
+
+    if (conversation.type === "partner") {
+      return updatePartnerConversation(conversation, reply);
+    }
+
+    if (conversation.type === "transcription") {
+      if (isNegativeReply(reply)) {
+        return {
+          conversation,
+          question: "",
+          cancelled: true,
+        };
+      }
+
+      if (isPositiveReply(reply) || /\b(start|begin|yes|now)\b/i.test(reply)) {
+        return {
+          conversation,
+          question: "",
+          command: "start live transcription",
+        };
+      }
+
+      return {
+        conversation,
+        question: "Should I start live transcription now?",
+      };
+    }
+
+    return { conversation, question: "" };
+  }
+
+  function commandForConversation(conversation) {
+    if (conversation.type === "meeting") {
+      return buildMeetingConversationCommand(conversation);
+    }
+
+    if (conversation.type === "reminder") {
+      return buildReminderConversationCommand(conversation);
+    }
+
+    if (conversation.type === "task") {
+      return buildTaskConversationCommand(conversation);
+    }
+
+    if (conversation.type === "operation") {
+      return buildOperationConversationCommand(conversation);
+    }
+
+    if (conversation.type === "partner") {
+      return buildPartnerConversationCommand(conversation);
+    }
+
+    return "";
+  }
+
+  async function continuePendingConversation(reply) {
     const conversation = pendingConversationRef.current;
 
-    if (!conversation || conversation.type !== "meeting") {
+    if (!conversation) {
       return false;
     }
 
-    const update = updateMeetingConversation(conversation, reply);
+    const update = updatePendingConversation(conversation, reply);
 
     if (update.question) {
       setPendingConversation(update.conversation);
@@ -816,22 +1278,87 @@ export default function useVoiceAgent({
     }
 
     setPendingConversation(null);
-    await executeCommandText(buildMeetingConversationCommand(update.conversation));
+
+    if (update.cancelled) {
+      await respond("Okay. I cancelled that.");
+      return true;
+    }
+
+    await executeCommandText(update.command || commandForConversation(update.conversation));
     return true;
   }
 
-  async function startMeetingConversation(command) {
-    const conversation = createMeetingConversation(command);
-    const nextStep = getNextMeetingStep(conversation);
+  function createConversationForCommand(command, normalizedCommand) {
+    if (hasMeetingSchedulingIntent(normalizedCommand)) {
+      return {
+        conversation: createMeetingConversation(command),
+        getNextStep: getNextMeetingStep,
+      };
+    }
+
+    if (hasStandaloneReminderIntent(normalizedCommand)) {
+      return {
+        conversation: createReminderConversation(command),
+        getNextStep: getNextReminderStep,
+      };
+    }
+
+    if (hasTaskIntent(normalizedCommand)) {
+      return {
+        conversation: createTaskConversation(command),
+        getNextStep: getNextTaskStep,
+      };
+    }
+
+    if (hasOperationIntent(normalizedCommand)) {
+      return {
+        conversation: createOperationConversation(command),
+        getNextStep: getNextOperationStep,
+      };
+    }
+
+    if (hasPartnerIntent(normalizedCommand)) {
+      return {
+        conversation: createPartnerConversation(command),
+        getNextStep: getNextPartnerStep,
+      };
+    }
+
+    if (
+      hasSoftTranscriptionIntent(normalizedCommand) &&
+      !commandWantsTranscription(normalizedCommand)
+    ) {
+      return {
+        conversation: { type: "transcription", asking: "confirm" },
+        getNextStep: () => ({
+          asking: "confirm",
+          question: "Should I start live transcription now?",
+        }),
+      };
+    }
+
+    return null;
+  }
+
+  async function startConversation(command, normalizedCommand) {
+    const setup = createConversationForCommand(command, normalizedCommand);
+
+    if (!setup) {
+      return false;
+    }
+
+    const { conversation, getNextStep } = setup;
+    const nextStep = getNextStep(conversation);
 
     if (nextStep) {
       setPendingConversation({ ...conversation, asking: nextStep.asking });
       await respond(nextStep.question);
-      return;
+      return true;
     }
 
     setPendingConversation(null);
-    await executeCommandText(buildMeetingConversationCommand(conversation));
+    await executeCommandText(commandForConversation(conversation));
+    return true;
   }
 
   async function runCommand(commandText) {
@@ -847,7 +1374,7 @@ export default function useVoiceAgent({
     setLiveTranscript("");
     setTypedReply("");
 
-    if (await continueMeetingConversation(heardCommand)) {
+    if (await continuePendingConversation(heardCommand)) {
       return;
     }
 
@@ -864,8 +1391,7 @@ export default function useVoiceAgent({
       return;
     }
 
-    if (hasMeetingSchedulingIntent(finalCommand)) {
-      await startMeetingConversation(heardCommand);
+    if (await startConversation(heardCommand, finalCommand)) {
       return;
     }
 

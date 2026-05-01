@@ -305,6 +305,7 @@ function QuickAICommand({
   setAlerts,
   setReminders,
   setOperations,
+  setPartners,
   onNavigate,
   onStartTranscribing,
 }) {
@@ -352,6 +353,10 @@ function QuickAICommand({
 
     if (action.type === "task" && data.operation) {
       setOperations?.((previous) => [data.operation, ...previous]);
+    }
+
+    if (action.type === "partner" && data.partner) {
+      setPartners?.((previous) => [data.partner, ...previous]);
     }
   }
 
@@ -982,6 +987,7 @@ export default function DashboardView({
   setAlerts,
   setReminders,
   setOperations,
+  setPartners,
   onStartTranscribing,
   onNavigate,
 }) {
@@ -1211,6 +1217,7 @@ export default function DashboardView({
           setAlerts={setAlerts}
           setReminders={setReminders}
           setOperations={setOperations}
+          setPartners={setPartners}
           onNavigate={onNavigate}
           onStartTranscribing={onStartTranscribing}
         />

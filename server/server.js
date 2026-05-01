@@ -1008,6 +1008,27 @@ function parseFlexibleDateLike(value, { requireTime = false } = {}) {
   }
 
   const text = cleanText(value);
+  const relativeMatch = text.match(
+    /\bin\s+(a|an|one|\d+)\s+(minute|minutes|min|mins|hour|hours|hr|hrs|day|days)\b/i
+  );
+
+  if (relativeMatch) {
+    const amountText = relativeMatch[1].toLowerCase();
+    const amount = /^(a|an|one)$/.test(amountText)
+      ? 1
+      : Number.parseInt(amountText, 10);
+    const unit = relativeMatch[2].toLowerCase();
+    const minutes = unit.startsWith("hour") || unit.startsWith("hr")
+      ? amount * 60
+      : unit.startsWith("day")
+        ? amount * 24 * 60
+        : amount;
+
+    if (Number.isFinite(minutes) && minutes > 0) {
+      return addMinutes(new Date(), minutes);
+    }
+  }
+
   const hasExplicitTime = Boolean(parseTimeParts(text));
   const directDate = new Date(value);
 
@@ -1767,7 +1788,16 @@ app.post("/api/meetings", requireRole(...ADMIN_ROLES), (req, res) => {
 app.patch("/api/meetings/:id", requireRole(...ADMIN_ROLES), (req, res) => {
   const payload = {};
 
-  for (const field of ["title", "time", "duration", "location", "briefing", "risk", "minutes"]) {
+  for (const field of [
+    "title",
+    "time",
+    "duration",
+    "location",
+    "briefing",
+    "risk",
+    "minutes",
+    "status",
+  ]) {
     if (hasBodyField(req.body, field)) {
       payload[field] = cleanText(req.body[field]);
     }
@@ -3130,6 +3160,7 @@ const COMMAND_ACTION_TYPES = [
   "transcript_summary",
   "briefing",
   "task",
+  "partner",
   "general_ai",
 ];
 
@@ -3139,6 +3170,7 @@ const WRITE_COMMAND_TYPES = new Set([
   "operation_alert",
   "email_draft",
   "task",
+  "partner",
 ]);
 
 const SUCCESS_COMMAND_STATUSES = new Set([
@@ -3185,6 +3217,9 @@ function normalizeCommandType(type) {
     reminder: "alarm",
     email: "email_draft",
     draft_email: "email_draft",
+    partnership: "partner",
+    vendor: "partner",
+    sponsor: "partner",
     ai: "general_ai",
     answer: "general_ai",
   };
@@ -3597,6 +3632,21 @@ function buildClauseActions(clause) {
     });
   }
 
+  if (/\b(partner|partnership|vendor|sponsor|collaboration)\b/i.test(clause)) {
+    const name = inferRecordTitle(clause, "Partner")
+      .replace(/\b(partner|partnership|vendor|sponsor|collaboration)\b/gi, "")
+      .trim() || "Partner";
+
+    actions.push({
+      type: "partner",
+      title: name,
+      data: {
+        name,
+        next_step: clause,
+      },
+    });
+  }
+
   return actions;
 }
 
@@ -3858,6 +3908,7 @@ Supported action types:
 - transcript_summary
 - briefing
 - task
+- partner
 - general_ai
 
 Current date/time: ${new Date().toISOString()}
@@ -3882,6 +3933,7 @@ Data guidance:
 - report/briefing/general_ai data: prompt.
 - transcript_summary data: prompt.
 - task data: title, detail, severity, area, status.
+- partner data: name, email, phone, milestone, next_step.
 
 Rules:
 - Preserve every separate task in the user command.
@@ -3893,6 +3945,7 @@ Rules:
 - If the user says "set an alert/alarm/reminder for/at/by a time", use alarm.
 - If the user says "mark ... high risk", "repair", "issue", or "smart alert", use operation_alert.
 - If the user says a meeting is high priority, keep that as meeting priority/risk unless there is an operations risk, repair, issue, or smart alert.
+- If the user asks to add or create a partner, vendor, sponsor, or partnership record, use partner.
 - If an action is missing required details, include "missing": ["field"].
 - Never create delete/archive/send-email actions.
 - For email replies, create an email_draft only. Never send.
@@ -3993,6 +4046,7 @@ async function buildCommandContext(req) {
     alerts,
     operations,
     tasks,
+    partners,
     transcripts,
     emailDrafts,
     emails,
@@ -4007,6 +4061,7 @@ async function buildCommandContext(req) {
       listRecentRows("tasks", 5, (query) =>
         currentUserEmail ? query.eq("created_by", currentUserEmail) : query
       ),
+      listRecentRows("partners"),
       listRecentRows("meeting_transcripts", 3, (query) =>
         currentUserEmail ? query.eq("created_by", currentUserEmail) : query
       ),
@@ -4025,6 +4080,7 @@ async function buildCommandContext(req) {
     alerts,
     operations,
     tasks,
+    partners,
     transcripts,
     emailDrafts,
     emails,
@@ -4069,6 +4125,7 @@ function hubViewForTable(table) {
   if (["alerts", "operations", "operation_alerts", "tasks"].includes(table)) {
     return "operations";
   }
+  if (["partners"].includes(table)) return "partners";
   if (["meeting_transcripts"].includes(table)) return "transcripts";
   if (["emails", "email_drafts"].includes(table)) return "emails";
 
@@ -4082,6 +4139,7 @@ function buildHubSources(context, question) {
     alerts: context.alerts,
     operations: context.operations,
     tasks: context.tasks,
+    partners: context.partners,
     meeting_transcripts: context.transcripts,
     email_drafts: context.emailDrafts,
     emails: context.emails,
@@ -4348,6 +4406,7 @@ function commandContextPrompt(context) {
     alerts: context.alerts,
     operations: context.operations,
     tasks: context.tasks,
+    partners: context.partners,
     transcripts: context.transcripts,
     emailDrafts: context.emailDrafts,
     emails: context.emails,
@@ -4670,6 +4729,43 @@ async function executeCommandAction(action, req, context, createdRecords, comman
         : completedAction(action, "created", title, { task });
     }
 
+    if (action.type === "partner") {
+      const name =
+        cleanText(action.data?.name) ||
+        cleanText(action.data?.title) ||
+        action.title;
+
+      if (!name) {
+        return needsClarification(action, ["name"], "Partner name is required.");
+      }
+
+      const payload = {
+        name,
+        email:
+          cleanText(action.data?.email) ||
+          cleanText(command.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)?.[0]),
+        phone:
+          cleanText(action.data?.phone) ||
+          cleanText(command.match(/\+?\d[\d\s().-]{6,}\d/)?.[0]),
+        last_contact: cleanText(action.data?.last_contact || action.data?.lastContact),
+        milestone: cleanText(action.data?.milestone),
+        next_step: cleanText(action.data?.next_step || action.data?.nextStep),
+      };
+      const { row: partner, reused } = await upsertCommandRecord(
+        "partners",
+        payload,
+        {
+          name,
+          email: payload.email,
+        }
+      );
+
+      createdRecords.partners.push(partner);
+      return reused
+        ? reusedAction(action, name, { partner })
+        : completedAction(action, "created", name, { partner });
+    }
+
     if (action.type === "email_draft") {
       const sourceQuery =
         cleanText(action.data?.source_query) ||
@@ -4800,6 +4896,7 @@ function commandTypeLabel(action) {
   if (action.type === "email_draft") return "email draft";
   if (action.type === "transcript_summary") return "transcript summary";
   if (action.type === "general_ai") return "AI response";
+  if (action.type === "partner") return "partner";
 
   return action.type.replaceAll("_", " ");
 }
@@ -4913,6 +5010,7 @@ app.post("/api/command", requireLogin, async (req, res) => {
       operationAlerts: [],
       operations: [],
       tasks: [],
+      partners: [],
       emailDrafts: [],
     };
     const actions = [];
