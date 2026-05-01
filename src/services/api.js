@@ -194,10 +194,10 @@ export function signupUser(account) {
   });
 }
 
-export function loginWithSupabaseToken(accessToken) {
+export function loginWithSupabaseToken(accessToken, googleAuth = {}) {
   return requestJson("/api/auth/supabase", {
     method: "POST",
-    body: JSON.stringify({ accessToken }),
+    body: JSON.stringify({ accessToken, ...googleAuth }),
   });
 }
 

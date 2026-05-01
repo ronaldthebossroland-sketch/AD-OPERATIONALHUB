@@ -11,6 +11,14 @@ import {
   SUPABASE_WEB_REDIRECT_URL,
 } from "./supabaseClient";
 
+const GOOGLE_APP_SCOPES = [
+  "openid",
+  "email",
+  "profile",
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.send",
+].join(" ");
+
 function ensureSupabaseAuth() {
   if (!isSupabaseAuthConfigured || !supabase) {
     throw new Error(
@@ -43,8 +51,23 @@ function readAuthParams(url) {
       searchParams.get("error_description") ||
       hashParams.get("error_description"),
     parsedUrl,
+    providerRefreshToken:
+      searchParams.get("provider_refresh_token") ||
+      hashParams.get("provider_refresh_token"),
+    providerScope:
+      searchParams.get("scope") ||
+      hashParams.get("scope") ||
+      (searchParams.get("provider_token") || hashParams.get("provider_token")
+        ? GOOGLE_APP_SCOPES
+        : ""),
+    providerToken:
+      searchParams.get("provider_token") || hashParams.get("provider_token"),
     refreshToken:
       searchParams.get("refresh_token") || hashParams.get("refresh_token"),
+    tokenExpiresAt:
+      searchParams.get("expires_at") || hashParams.get("expires_at"),
+    tokenExpiresIn:
+      searchParams.get("expires_in") || hashParams.get("expires_in"),
   };
 }
 
@@ -89,7 +112,7 @@ function cleanCurrentUrl() {
   window.history.replaceState({}, document.title, "/");
 }
 
-async function syncAppSessionFromSupabase() {
+async function syncAppSessionFromSupabase(providerAuth = {}) {
   const { data, error } = await supabase.auth.getSession();
 
   if (error) {
@@ -102,7 +125,16 @@ async function syncAppSessionFromSupabase() {
     return null;
   }
 
-  const result = await loginWithSupabaseToken(accessToken);
+  const result = await loginWithSupabaseToken(accessToken, {
+    googleProviderExpiresAt: providerAuth.tokenExpiresAt,
+    googleProviderExpiresIn: providerAuth.tokenExpiresIn,
+    googleProviderRefreshToken:
+      providerAuth.providerRefreshToken ||
+      data.session.provider_refresh_token,
+    googleProviderScope: providerAuth.providerScope,
+    googleProviderToken:
+      providerAuth.providerToken || data.session.provider_token,
+  });
 
   if (!result.ok) {
     throw new Error(result.error || "Could not finish Google sign-in.");
@@ -120,9 +152,12 @@ export async function signInWithGoogle() {
     provider: "google",
     options: {
       queryParams: {
-        prompt: "select_account",
+        access_type: "offline",
+        include_granted_scopes: "true",
+        prompt: "consent select_account",
       },
       redirectTo,
+      scopes: GOOGLE_APP_SCOPES,
       skipBrowserRedirect: isNative,
     },
   });
@@ -153,8 +188,9 @@ export async function completeSupabaseAuthFromUrl(url) {
     return null;
   }
 
+  const authParams = readAuthParams(url);
   const { accessToken, code, error, errorDescription, refreshToken } =
-    readAuthParams(url);
+    authParams;
 
   if (error || errorDescription) {
     throw new Error(errorDescription || error);
@@ -180,7 +216,7 @@ export async function completeSupabaseAuthFromUrl(url) {
 
   cleanCurrentUrl();
 
-  return syncAppSessionFromSupabase();
+  return syncAppSessionFromSupabase(authParams);
 }
 
 export async function registerOAuthDeepLinkHandler(onUser) {

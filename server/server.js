@@ -49,6 +49,12 @@ const APP_USER_COLUMNS =
   "id,name,email,role,access,is_active,auth_provider,created_at";
 const APP_USER_AUTH_COLUMNS = `${APP_USER_COLUMNS},password_hash`;
 const ADMIN_ROLES = ["Super Admin", "Admin"];
+const GMAIL_OAUTH_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+];
 const transcriptionTickets = new Map();
 const PASSWORD_ITERATIONS = 310000;
 const PASSWORD_KEY_LENGTH = 32;
@@ -639,6 +645,12 @@ function hasGmailSendScope(tokens) {
     .includes("https://www.googleapis.com/auth/gmail.send");
 }
 
+function hasGmailReadScope(tokens) {
+  return String(tokens?.scope || "")
+    .split(/\s+/)
+    .includes("https://www.googleapis.com/auth/gmail.readonly");
+}
+
 function encodeBase64Url(value) {
   return Buffer.from(value)
     .toString("base64")
@@ -705,6 +717,81 @@ function getSafeAppReturnUrl(value, fallbackPath = "/") {
   } catch {
     return fallbackUrl;
   }
+}
+
+function getProviderTokenExpiry(expiresAt, expiresIn) {
+  const parsedExpiresAt = Number.parseInt(expiresAt, 10);
+
+  if (!Number.isNaN(parsedExpiresAt) && parsedExpiresAt > 0) {
+    return parsedExpiresAt < 1000000000000
+      ? parsedExpiresAt * 1000
+      : parsedExpiresAt;
+  }
+
+  const parsedExpiresIn = Number.parseInt(expiresIn, 10);
+
+  if (!Number.isNaN(parsedExpiresIn) && parsedExpiresIn > 0) {
+    return Date.now() + parsedExpiresIn * 1000;
+  }
+
+  return undefined;
+}
+
+function getGoogleProviderTokens(body) {
+  const providerToken = cleanText(
+    body.googleProviderToken || body.providerToken
+  );
+
+  if (!providerToken) {
+    return null;
+  }
+
+  const providerRefreshToken = cleanText(
+    body.googleProviderRefreshToken || body.providerRefreshToken
+  );
+  const providerScope =
+    cleanText(body.googleProviderScope || body.providerScope) ||
+    GMAIL_OAUTH_SCOPES.join(" ");
+  const expiryDate = getProviderTokenExpiry(
+    body.googleProviderExpiresAt || body.providerExpiresAt,
+    body.googleProviderExpiresIn || body.providerExpiresIn
+  );
+
+  return {
+    access_token: providerToken,
+    ...(providerRefreshToken ? { refresh_token: providerRefreshToken } : {}),
+    ...(expiryDate ? { expiry_date: expiryDate } : {}),
+    scope: providerScope,
+    token_type: "Bearer",
+  };
+}
+
+async function attachGmailTokensFromProvider(req, expectedEmail) {
+  const tokens = getGoogleProviderTokens(req.body);
+
+  if (!tokens) {
+    return false;
+  }
+
+  const oauth2Client = createGoogleClient();
+  oauth2Client.setCredentials(tokens);
+
+  const profile = await getGoogleProfile(oauth2Client, tokens);
+  const profileEmail = normalizeEmail(profile.email);
+
+  if (!profileEmail || profileEmail !== expectedEmail) {
+    throw new Error("Google Gmail account must match the signed-in account.");
+  }
+
+  req.session.tokens = tokens;
+  req.session.gmail = {
+    connectedAt: new Date().toISOString(),
+    connectedEmail: profileEmail,
+    readEnabled: hasGmailReadScope(tokens),
+    sendEnabled: hasGmailSendScope(tokens),
+  };
+
+  return true;
 }
 
 function parseDateLike(value) {
@@ -890,11 +977,7 @@ function startGmailOAuth(req, res) {
       access_type: "offline",
       include_granted_scopes: true,
       prompt: "consent select_account",
-      scope: [
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile",
-      ],
+      scope: GMAIL_OAUTH_SCOPES,
       state: encodeOAuthState({
         flow: "gmail",
         returnTo,
@@ -963,6 +1046,8 @@ app.get("/auth/google/callback", async (req, res) => {
       req.session.gmail = {
         connectedEmail: profile.email,
         connectedAt: new Date().toISOString(),
+        readEnabled: hasGmailReadScope(tokens),
+        sendEnabled: hasGmailSendScope(tokens),
       };
     } else {
       setSessionUser(req, user);
@@ -1062,10 +1147,24 @@ app.post("/api/auth/supabase", async (req, res) => {
       });
     }
 
-    delete req.session.tokens;
     setSessionUser(req, user);
 
-    res.json({ success: true, user: req.session.user });
+    let gmailConnected = Boolean(req.session.tokens);
+
+    try {
+      gmailConnected =
+        (await attachGmailTokensFromProvider(req, email)) || gmailConnected;
+    } catch (gmailError) {
+      delete req.session.tokens;
+      delete req.session.gmail;
+      console.warn("Supabase Gmail bridge warning:", gmailError);
+    }
+
+    res.json({
+      gmailConnected,
+      success: true,
+      user: req.session.user,
+    });
   } catch (error) {
     console.error("Supabase auth bridge error:", error);
     res.status(401).json({ error: "Could not verify Google sign-in." });
@@ -4593,6 +4692,7 @@ app.post("/api/email-drafts", requireRole(...ADMIN_ROLES), async (req, res) => {
 app.get("/api/gmail/status", requireRole(...ADMIN_ROLES), (req, res) => {
   res.json({
     connected: Boolean(req.session.user && req.session.tokens),
+    gmail: req.session.gmail || null,
     user: req.session.user || null,
   });
 });
