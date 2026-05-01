@@ -18,6 +18,7 @@ import ProjectsView from "./components/pages/ProjectsView";
 import SettingsView from "./components/pages/SettingsView";
 import TaskBoardView from "./components/pages/TaskBoardView";
 import TranscriptsView from "./components/pages/TranscriptsView";
+import VoiceHomeView from "./components/pages/VoiceHomeView";
 import { navItems } from "./data/navItems";
 import {
   getActivities,
@@ -44,6 +45,7 @@ import {
 } from "./services/mobileCapabilities";
 
 const viewAccess = {
+  assistant: ["Super Admin", "Admin", "Viewer"],
   dashboard: ["Super Admin", "Admin", "Viewer"],
   calendar: ["Super Admin", "Admin"],
   meetings: ["Super Admin", "Admin"],
@@ -59,12 +61,12 @@ const viewAccess = {
 
 function getInitialActiveView() {
   if (typeof window === "undefined") {
-    return "dashboard";
+    return "assistant";
   }
 
   const requestedView = new URLSearchParams(window.location.search).get("view");
 
-  return viewAccess[requestedView] ? requestedView : "dashboard";
+  return viewAccess[requestedView] ? requestedView : "assistant";
 }
 
 function canAccessView(user, view) {
@@ -141,7 +143,7 @@ export default function ADOperationalHub() {
 
   const handleAuthComplete = useCallback((user) => {
     setCurrentUser(user);
-    setActiveView("dashboard");
+    setActiveView("assistant");
     setAuthLoading(false);
 
     if (
@@ -329,7 +331,7 @@ export default function ADOperationalHub() {
       setActivities([]);
       setOperations([]);
       setTranscriptionAutoStartKey(0);
-      setActiveView("dashboard");
+      setActiveView("assistant");
     }
   }
 
@@ -482,6 +484,17 @@ export default function ADOperationalHub() {
     }
 
     switch (activeView) {
+      case "assistant":
+        return (
+          <VoiceHomeView
+            setAlerts={setAlerts}
+            setMeetings={setMeetings}
+            setOperations={setOperations}
+            setReminders={setReminders}
+            onNavigate={setActiveView}
+            onStartTranscribing={startTranscribingFromCommand}
+          />
+        );
       case "settings":
         return <SettingsView currentUser={currentUser} onLogout={handleLogout} />;
       case "calendar":
@@ -570,6 +583,14 @@ export default function ADOperationalHub() {
 
   if (!currentUser) {
     return <LoginPage onLogin={setCurrentUser} />;
+  }
+
+  if (activeView === "assistant") {
+    return (
+      <div className="voice-shell h-[100dvh] overflow-hidden bg-slate-100 text-slate-950">
+        {renderView()}
+      </div>
+    );
   }
 
   return (

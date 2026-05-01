@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createTranscriptionSession,
   runAICommand,
+  synthesizeVoiceAudio,
   TRANSCRIPTION_WS_URL,
 } from "../services/api";
 
@@ -140,6 +141,48 @@ function isGreeting(text) {
   );
 }
 
+function getNavigationIntent(command) {
+  if (!/\b(open|go to|show|view)\b/i.test(command)) {
+    return null;
+  }
+
+  if (/\b(assistant|voice|home)\b/i.test(command)) return "assistant";
+  if (/\bdashboard\b/i.test(command)) return "dashboard";
+  if (/\bcalendar|schedule\b/i.test(command)) return "calendar";
+  if (/\bmeetings?\b/i.test(command)) return "meetings";
+  if (/\btasks?|kanban|board\b/i.test(command)) return "tasks";
+  if (/\bapprovals?|approve|review queue\b/i.test(command)) return "approvals";
+  if (/\b(transcripts?|transcrib)/i.test(command)) return "transcripts";
+  if (/\bprojects?\b/i.test(command)) return "projects";
+  if (/\bpartners?|partnerships?|vendors?\b/i.test(command)) return "partners";
+  if (/\bemails?|gmail|inbox\b/i.test(command)) return "emails";
+  if (/\boperations?|actions?|repairs?|issues?|queue\b/i.test(command)) {
+    return "operations";
+  }
+  if (/\bsettings?|users?|access\b/i.test(command)) return "settings";
+
+  return null;
+}
+
+function navigationLabel(view) {
+  const labels = {
+    assistant: "the assistant",
+    dashboard: "the dashboard",
+    calendar: "calendar",
+    meetings: "meetings",
+    tasks: "tasks",
+    approvals: "approvals",
+    transcripts: "transcripts",
+    projects: "projects",
+    partners: "partners",
+    emails: "emails",
+    operations: "operations",
+    settings: "settings",
+  };
+
+  return labels[view] || view;
+}
+
 function normalizeSpokenCommand(text) {
   return cleanVoiceText(text)
     .replace(/\b(ready|okay|ok)\.?\s*(i\s+am|i'm)?\s*listening\.?/gi, " ")
@@ -267,6 +310,7 @@ function friendlyCommandError(data) {
 
 export default function useVoiceAgent({
   onAction,
+  onNavigate,
   onResult,
   onStartTranscribing,
 } = {}) {
@@ -284,6 +328,7 @@ export default function useVoiceAgent({
 
   const mediaStreamRef = useRef(null);
   const socketRef = useRef(null);
+  const speechAudioRef = useRef(null);
   const audioContextRef = useRef(null);
   const sourceRef = useRef(null);
   const processorRef = useRef(null);
@@ -349,6 +394,10 @@ export default function useVoiceAgent({
 
   const closeVoiceResources = useCallback(() => {
     window.clearTimeout(silenceTimerRef.current);
+    if (speechAudioRef.current) {
+      speechAudioRef.current.pause();
+      speechAudioRef.current = null;
+    }
     closeVoiceAudioGraph();
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     mediaStreamRef.current = null;
@@ -369,19 +418,75 @@ export default function useVoiceAgent({
     };
   }, [closeVoiceResources]);
 
+  function speakWithBrowserVoice(text, resolve) {
+    if (!window.speechSynthesis || !text) {
+      resolve();
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.94;
+    utterance.pitch = 0.98;
+
+    const voices = window.speechSynthesis.getVoices?.() || [];
+    const preferredVoice = voices.find((voice) =>
+      /natural|aria|jenny|samantha|serena|female/i.test(voice.name)
+    );
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    utterance.onend = resolve;
+    utterance.onerror = resolve;
+    window.speechSynthesis.speak(utterance);
+  }
+
   function speakAsync(text) {
     return new Promise((resolve) => {
-      if (!window.speechSynthesis || !text) {
+      if (!text) {
         resolve();
         return;
       }
 
       setStatus("speaking");
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.onend = resolve;
-      utterance.onerror = resolve;
-      window.speechSynthesis.speak(utterance);
+
+      synthesizeVoiceAudio(text)
+        .then((audioBlob) => {
+          if (!audioBlob?.size) {
+            throw new Error("Empty Deepgram audio response.");
+          }
+
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+          speechAudioRef.current = audio;
+
+          const cleanup = () => {
+            URL.revokeObjectURL(audioUrl);
+            if (speechAudioRef.current === audio) {
+              speechAudioRef.current = null;
+            }
+          };
+
+          const finish = () => {
+            cleanup();
+            resolve();
+          };
+
+          audio.onended = finish;
+          audio.onerror = () => {
+            cleanup();
+            speakWithBrowserVoice(text, resolve);
+          };
+          audio.play().catch(() => {
+            cleanup();
+            speakWithBrowserVoice(text, resolve);
+          });
+        })
+        .catch(() => {
+          speakWithBrowserVoice(text, resolve);
+        });
     });
   }
 
@@ -412,6 +517,14 @@ export default function useVoiceAgent({
 
     if (isCasualGreetingOnly(heardCommand, finalCommand)) {
       await respond("Hi. I am listening and ready for your next command.");
+      return;
+    }
+
+    const navigationIntent = getNavigationIntent(finalCommand);
+
+    if (navigationIntent) {
+      onNavigate?.(navigationIntent);
+      await respond(`Opening ${navigationLabel(navigationIntent)}.`);
       return;
     }
 

@@ -58,6 +58,7 @@ function getNavigationIntent(command) {
     return null;
   }
 
+  if (/\b(assistant|voice|home)\b/i.test(command)) return "assistant";
   if (/\bcalendar|schedule\b/i.test(command)) return "calendar";
   if (/\bmeetings?\b/i.test(command)) return "meetings";
   if (/\btasks?|kanban|board\b/i.test(command)) return "tasks";
@@ -537,6 +538,7 @@ function QuickAICommand({
 
           <VoiceAgent
             onAction={applyCommandAction}
+            onNavigate={onNavigate}
             onResult={(result) => {
               setCommandResult(result);
               setResponse(result.summary || "Done.");

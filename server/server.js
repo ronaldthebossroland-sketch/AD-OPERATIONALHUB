@@ -5291,6 +5291,48 @@ app.post("/api/gmail/send", requireRole(...ADMIN_ROLES), async (req, res) => {
   }
 });
 
+app.post("/api/voice/speak", requireLogin, async (req, res) => {
+  try {
+    if (!deepgram) {
+      return res.status(503).json({
+        error: "Deepgram voice is not configured on the backend.",
+      });
+    }
+
+    const text = cleanText(req.body.text).slice(0, 1200);
+
+    if (!text) {
+      return res.status(400).json({ error: "Text is required for voice." });
+    }
+
+    const voiceModel =
+      process.env.DEEPGRAM_VOICE_MODEL?.trim() ||
+      process.env.DEEPGRAM_SPEAK_MODEL?.trim() ||
+      "aura-2-thalia-en";
+    const requestedSpeed = Number.parseFloat(
+      process.env.DEEPGRAM_VOICE_SPEED || "0.94"
+    );
+    const speed = Number.isFinite(requestedSpeed)
+      ? Math.min(1.2, Math.max(0.75, requestedSpeed))
+      : 0.94;
+    const audio = await deepgram.speak.v1.audio.generate({
+      text,
+      model: voiceModel,
+      encoding: "linear16",
+      container: "wav",
+      speed,
+    });
+    const audioBuffer = Buffer.from(await audio.arrayBuffer());
+
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(audioBuffer);
+  } catch (error) {
+    console.error("Deepgram voice error:", error);
+    res.status(500).json({ error: "Could not create Deepgram voice audio." });
+  }
+});
+
 app.use((error, _req, res, next) => {
   void next;
   console.error("Unhandled API error:", error);

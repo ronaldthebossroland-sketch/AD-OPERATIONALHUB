@@ -25,6 +25,7 @@ const statusLabels = {
 
 export default function VoiceAgent({
   onAction,
+  onNavigate,
   onResult,
   onStartTranscribing,
 }) {
@@ -44,6 +45,7 @@ export default function VoiceAgent({
     submitTypedReply,
   } = useVoiceAgent({
     onAction,
+    onNavigate,
     onResult,
     onStartTranscribing,
   });

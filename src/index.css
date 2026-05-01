@@ -734,3 +734,171 @@ body {
 #root .text-slate-500 {
   color: #756a82;
 }
+
+/* Minimal premium pass: calm surfaces, restrained color, and less visual noise. */
+body,
+.luxury-app,
+.luxury-auth,
+.voice-shell,
+#root > div:has(aside) {
+  background: #f7f7f4 !important;
+}
+
+#root main,
+.luxury-main {
+  background: #f7f7f4 !important;
+}
+
+#root aside,
+.luxury-sidebar {
+  position: relative;
+  isolation: isolate;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: #121826 !important;
+  box-shadow: 18px 0 44px rgba(15, 23, 42, 0.16);
+}
+
+#root aside::before,
+.luxury-sidebar::before,
+.luxury-app::before,
+.luxury-auth::before {
+  display: none !important;
+}
+
+#root aside .bg-slate-100,
+#root aside .bg-white,
+.luxury-briefing-card,
+.luxury-user-card {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none;
+}
+
+#root aside button.bg-slate-950,
+.luxury-sidebar-nav-active {
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+#root main .bg-white,
+.luxury-card,
+.luxury-panel,
+.luxury-login-card {
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08) !important;
+  backdrop-filter: blur(16px);
+}
+
+#root main .bg-slate-50,
+#root main .bg-slate-100,
+.luxury-soft-icon {
+  border-color: rgba(15, 23, 42, 0.07) !important;
+  background: #f4f1e9 !important;
+  box-shadow: none !important;
+}
+
+#root main .grid > div > .rounded-3xl.bg-white::before,
+.luxury-summary-card::before {
+  display: none !important;
+}
+
+#root header h1,
+.luxury-title {
+  background: none !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+#root header input,
+#root input,
+#root textarea,
+#root select {
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  background: rgba(255, 255, 255, 0.86) !important;
+  color: #111827;
+  box-shadow: none !important;
+}
+
+#root header button.bg-slate-950,
+#root main button.bg-slate-950,
+.luxury-button-primary {
+  border-color: #111827 !important;
+  background: #111827 !important;
+  color: #ffffff !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16) !important;
+}
+
+#root button.border,
+.luxury-button-outline {
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  background: rgba(255, 255, 255, 0.86) !important;
+  color: #111827 !important;
+  box-shadow: none !important;
+}
+
+#root .text-slate-950 {
+  color: #111827;
+}
+
+#root .text-slate-700,
+#root .text-slate-600,
+#root .text-slate-500 {
+  color: #667085;
+}
+
+.voice-home {
+  background: #f7f7f4;
+}
+
+.voice-home__button {
+  display: inline-flex;
+  width: min(72vw, 23rem);
+  height: min(72vw, 23rem);
+  min-width: 15rem;
+  min-height: 15rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
+  background: #111827;
+  color: #ffffff;
+  font-size: clamp(1.45rem, 4vw, 2.25rem);
+  font-weight: 900;
+  letter-spacing: 0;
+  box-shadow:
+    0 34px 80px rgba(15, 23, 42, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+}
+
+.voice-home__button:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow:
+    0 40px 90px rgba(15, 23, 42, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.voice-home__button:focus-visible {
+  outline: 4px solid rgba(17, 24, 39, 0.18);
+  outline-offset: 8px;
+}
+
+.voice-home__button.is-listening {
+  background: #164e4a;
+  box-shadow:
+    0 34px 80px rgba(22, 78, 74, 0.22),
+    0 0 0 12px rgba(22, 78, 74, 0.08);
+}
+
+.voice-home__button:disabled {
+  cursor: wait;
+  opacity: 0.92;
+}

@@ -5,6 +5,7 @@ import {
   ClipboardList,
   FileText,
   Mail,
+  Mic,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -13,6 +14,7 @@ import {
 
 export const navItems = [
   { key: "settings", label: "Settings", icon: Settings, adminOnly: true },
+  { key: "assistant", label: "Assistant", icon: Mic },
   { key: "dashboard", label: "Dashboard", icon: Sparkles },
   { key: "calendar", label: "Calendar", icon: CalendarClock },
   { key: "meetings", label: "Meetings", icon: CalendarDays },

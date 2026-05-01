@@ -467,3 +467,21 @@ export function createTranscriptionSession(sampleRate) {
     body: JSON.stringify({ sampleRate }),
   });
 }
+
+export async function synthesizeVoiceAudio(text) {
+  const res = await fetch(`${API_BASE_URL}/api/voice/speak`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!res.ok) {
+    const data = await parseResponseJson(res);
+    throw new Error(data.error || "Could not create voice audio.");
+  }
+
+  return res.blob();
+}
