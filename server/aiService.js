@@ -88,6 +88,13 @@ function isQuotaOrAvailabilityError(error) {
   );
 }
 
+function isConfigurationError(error) {
+  const code = error?.code || error?.error?.code;
+  const message = getErrorMessage(error).toLowerCase();
+
+  return code === "AI_NOT_CONFIGURED" || message.includes("not configured");
+}
+
 function createAIUnavailableError() {
   const error = new Error(
     "The AI service is temporarily unavailable. Please try again shortly."
@@ -96,17 +103,33 @@ function createAIUnavailableError() {
   return error;
 }
 
+function createAIConfigurationError() {
+  const error = new Error(
+    "The AI service is not configured. Add GEMINI_API_KEY or OPENAI_API_KEY on the backend."
+  );
+  error.code = "AI_NOT_CONFIGURED";
+  return error;
+}
+
 async function askWithFallback(primaryName, primaryAsk, fallbackName, fallbackAsk) {
   try {
     return await primaryAsk();
   } catch (primaryError) {
     const canFallback =
-      typeof fallbackAsk === "function" && isQuotaOrAvailabilityError(primaryError);
+      typeof fallbackAsk === "function" &&
+      (isQuotaOrAvailabilityError(primaryError) ||
+        isConfigurationError(primaryError));
 
     if (!canFallback) {
-      throw isQuotaOrAvailabilityError(primaryError)
-        ? createAIUnavailableError()
-        : primaryError;
+      if (isQuotaOrAvailabilityError(primaryError)) {
+        throw createAIUnavailableError();
+      }
+
+      if (isConfigurationError(primaryError)) {
+        throw createAIConfigurationError();
+      }
+
+      throw primaryError;
     }
 
     try {
@@ -119,6 +142,10 @@ async function askWithFallback(primaryName, primaryAsk, fallbackName, fallbackAs
         throw createAIUnavailableError();
       }
 
+      if (isConfigurationError(fallbackError)) {
+        throw createAIConfigurationError();
+      }
+
       throw fallbackError;
     }
   }
@@ -128,7 +155,7 @@ async function askGemini(prompt) {
   const gemini = getGeminiClient();
 
   if (!gemini) {
-    throw new Error("Gemini is not configured.");
+    throw createAIConfigurationError();
   }
 
   const response = await gemini.models.generateContent({
@@ -143,7 +170,7 @@ async function askOpenAI(prompt) {
   const openai = getOpenAIClient();
 
   if (!openai) {
-    throw new Error("OpenAI is not configured.");
+    throw createAIConfigurationError();
   }
 
   const response = await openai.responses.create({

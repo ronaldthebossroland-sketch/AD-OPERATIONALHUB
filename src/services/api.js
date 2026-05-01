@@ -74,7 +74,11 @@ export async function askAI(message) {
     body: JSON.stringify({ message }),
   });
 
-  return data.reply || data.error || "No AI response received.";
+  if (!data.ok) {
+    throw new Error(data.reply || data.error || "AI request failed.");
+  }
+
+  return data.reply || "No AI response received.";
 }
 
 export function runAICommand(command) {

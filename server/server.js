@@ -4028,7 +4028,9 @@ async function buildCommandContext(req) {
     transcripts,
     emailDrafts,
     emails,
-    gmailConnected: Boolean(req.session.tokens),
+    gmailConnected: Boolean(
+      req.session.tokens && hasGmailReadScope(req.session.tokens)
+    ),
   };
 }
 
@@ -5043,7 +5045,7 @@ app.post("/api/ai", requireLogin, async (req, res) => {
     const { message } = req.body;
 
     if (!message) {
-      return res.status(400).json({ reply: "No command was provided." });
+      return res.status(400).json({ error: "No command was provided." });
     }
 
     const reply = await askAI(message);
@@ -5054,7 +5056,7 @@ app.post("/api/ai", requireLogin, async (req, res) => {
   } catch (error) {
     console.error("AI Error:", error);
     res.status(500).json({
-      reply:
+      error:
         "The AI service could not respond. Please check API key, billing, or network.",
     });
   }
@@ -5124,9 +5126,22 @@ app.post("/api/email-drafts", requireRole(...ADMIN_ROLES), async (req, res) => {
 ========================= */
 
 app.get("/api/gmail/status", requireRole(...ADMIN_ROLES), (req, res) => {
+  const readEnabled = Boolean(
+    req.session.tokens && hasGmailReadScope(req.session.tokens)
+  );
+  const sendEnabled = Boolean(
+    req.session.tokens && hasGmailSendScope(req.session.tokens)
+  );
+
   res.json({
-    connected: Boolean(req.session.user && req.session.tokens),
-    gmail: req.session.gmail || null,
+    connected: Boolean(req.session.user && req.session.tokens && readEnabled),
+    gmail: req.session.tokens
+      ? {
+          ...(req.session.gmail || {}),
+          readEnabled,
+          sendEnabled,
+        }
+      : null,
     user: req.session.user || null,
   });
 });
@@ -5136,6 +5151,13 @@ app.get("/api/gmail/emails", requireRole(...ADMIN_ROLES), async (req, res) => {
     if (!req.session.tokens) {
       return res.status(401).json({
         error: "Gmail is not connected.",
+      });
+    }
+
+    if (!hasGmailReadScope(req.session.tokens)) {
+      return res.status(403).json({
+        error:
+          "Gmail read permission is not enabled. Sign in with Google again and approve Gmail access.",
       });
     }
 
