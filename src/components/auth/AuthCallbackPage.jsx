@@ -8,6 +8,7 @@ import {
 import {
   isSupabaseAuthConfigured,
   supabase,
+  supabaseAuthConfigError,
 } from "../../services/supabaseClient";
 
 export default function AuthCallbackPage({ onAuthenticated }) {
@@ -34,7 +35,8 @@ export default function AuthCallbackPage({ onAuthenticated }) {
     async function handleCallback() {
       if (!isSupabaseAuthConfigured || !supabase) {
         throw new Error(
-          "Supabase auth is not configured. Check the Vercel environment variables."
+          supabaseAuthConfigError ||
+            "Supabase auth is not configured. Check the Vercel environment variables."
         );
       }
 

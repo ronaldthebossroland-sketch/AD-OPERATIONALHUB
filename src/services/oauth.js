@@ -14,7 +14,7 @@ import {
 function ensureSupabaseAuth() {
   if (!isSupabaseAuthConfigured || !supabase) {
     throw new Error(
-      "Supabase auth is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel."
+      "Supabase auth is missing VITE_SUPABASE_ANON_KEY. Add your Supabase anon or publishable key to .env.local and Vercel."
     );
   }
 }
