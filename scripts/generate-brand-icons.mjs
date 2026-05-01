@@ -192,77 +192,217 @@ function drawSpark(buffer, width, size, cx, cy, radius, rgba) {
 function drawMark(buffer, width, size, offset = 0, multiplier = 1) {
   const points = (values) => values.map((value) => offset + value * multiplier);
 
-  const [x1, y1, x2, y2, x3, y3] = points([154, 339, 226, 164, 357, 339]);
-  const stroke = 31 * multiplier;
   const gold = color("#d8af55");
   const brightGold = color("#fff4c7");
   const cyan = color("#61e6ff");
+  const deepGold = color("#8a5a18");
 
-  drawLine(buffer, width, size, x1, y1, x2, y2, stroke, gold);
-  drawLine(buffer, width, size, x2, y2, x3, y3, stroke, gold);
+  const shield = [
+    [177, 158],
+    [335, 158],
+    [366, 224],
+    [341, 329],
+    [256, 384],
+    [171, 329],
+    [146, 224],
+    [177, 158],
+  ].map(([x, y]) => points([x, y]));
+
+  for (let index = 0; index < shield.length - 1; index += 1) {
+    drawLine(
+      buffer,
+      width,
+      size,
+      shield[index][0],
+      shield[index][1],
+      shield[index + 1][0],
+      shield[index + 1][1],
+      16 * multiplier,
+      index % 2 === 0 ? brightGold : gold
+    );
+  }
+
   drawLine(
     buffer,
     width,
     size,
-    offset + 213 * multiplier,
-    offset + 267 * multiplier,
-    offset + 306 * multiplier,
-    offset + 267 * multiplier,
-    25 * multiplier,
+    offset + 212 * multiplier,
+    offset + 136 * multiplier,
+    offset + 232 * multiplier,
+    offset + 108 * multiplier,
+    10 * multiplier,
     brightGold
   );
   drawLine(
     buffer,
     width,
     size,
-    offset + 159 * multiplier,
-    offset + 207 * multiplier,
-    offset + 236 * multiplier,
+    offset + 232 * multiplier,
+    offset + 108 * multiplier,
+    offset + 256 * multiplier,
+    offset + 136 * multiplier,
+    10 * multiplier,
+    gold
+  );
+  drawLine(
+    buffer,
+    width,
+    size,
+    offset + 256 * multiplier,
+    offset + 136 * multiplier,
+    offset + 280 * multiplier,
+    offset + 108 * multiplier,
+    10 * multiplier,
+    gold
+  );
+  drawLine(
+    buffer,
+    width,
+    size,
+    offset + 280 * multiplier,
+    offset + 108 * multiplier,
+    offset + 300 * multiplier,
+    offset + 136 * multiplier,
+    10 * multiplier,
+    brightGold
+  );
+  drawLine(
+    buffer,
+    width,
+    size,
+    offset + 212 * multiplier,
+    offset + 142 * multiplier,
+    offset + 300 * multiplier,
+    offset + 142 * multiplier,
+    9 * multiplier,
+    deepGold
+  );
+
+  drawLine(
+    buffer,
+    width,
+    size,
+    offset + 213 * multiplier,
+    offset + 225 * multiplier,
+    offset + 256 * multiplier,
+    offset + 306 * multiplier,
+    28 * multiplier,
+    gold
+  );
+  drawLine(
+    buffer,
+    width,
+    size,
+    offset + 256 * multiplier,
+    offset + 306 * multiplier,
+    offset + 314 * multiplier,
+    offset + 225 * multiplier,
+    28 * multiplier,
+    brightGold
+  );
+
+  drawLine(
+    buffer,
+    width,
+    size,
+    offset + 149 * multiplier,
     offset + 246 * multiplier,
-    11 * multiplier,
+    offset + 218 * multiplier,
+    offset + 205 * multiplier,
+    12 * multiplier,
     color("#7dd3fc")
   );
   drawLine(
     buffer,
     width,
     size,
-    offset + 236 * multiplier,
-    offset + 246 * multiplier,
-    offset + 310 * multiplier,
-    offset + 236 * multiplier,
-    11 * multiplier,
+    offset + 218 * multiplier,
+    offset + 205 * multiplier,
+    offset + 292 * multiplier,
+    offset + 212 * multiplier,
+    12 * multiplier,
     color("#38bdf8")
   );
   drawLine(
     buffer,
     width,
     size,
-    offset + 310 * multiplier,
-    offset + 236 * multiplier,
-    offset + 369 * multiplier,
-    offset + 192 * multiplier,
-    11 * multiplier,
+    offset + 292 * multiplier,
+    offset + 212 * multiplier,
+    offset + 362 * multiplier,
+    offset + 256 * multiplier,
+    12 * multiplier,
     color("#22d3ee")
   );
-  drawCircle(buffer, width, size, x2, y2, 14 * multiplier, brightGold);
-  drawCircle(buffer, width, size, x1, y1, 13 * multiplier, gold);
-  drawCircle(buffer, width, size, x3, y3, 13 * multiplier, cyan);
+
+  drawLine(
+    buffer,
+    width,
+    size,
+    offset + 151 * multiplier,
+    offset + 269 * multiplier,
+    offset + 224 * multiplier,
+    offset + 318 * multiplier,
+    10 * multiplier,
+    color("#a5f3fc")
+  );
+  drawLine(
+    buffer,
+    width,
+    size,
+    offset + 224 * multiplier,
+    offset + 318 * multiplier,
+    offset + 306 * multiplier,
+    offset + 313 * multiplier,
+    10 * multiplier,
+    color("#38bdf8")
+  );
+  drawLine(
+    buffer,
+    width,
+    size,
+    offset + 306 * multiplier,
+    offset + 313 * multiplier,
+    offset + 366 * multiplier,
+    offset + 244 * multiplier,
+    10 * multiplier,
+    color("#2563eb")
+  );
+
   drawCircle(
     buffer,
     width,
     size,
-    offset + 369 * multiplier,
-    offset + 192 * multiplier,
-    9 * multiplier,
+    offset + 149 * multiplier,
+    offset + 246 * multiplier,
+    11 * multiplier,
+    color("#a5f3fc")
+  );
+  drawCircle(
+    buffer,
+    width,
+    size,
+    offset + 362 * multiplier,
+    offset + 256 * multiplier,
+    12 * multiplier,
     color("#22d3ee")
+  );
+  drawCircle(
+    buffer,
+    width,
+    size,
+    offset + 256 * multiplier,
+    offset + 306 * multiplier,
+    14 * multiplier,
+    brightGold
   );
   drawSpark(
     buffer,
     width,
     size,
-    offset + 352 * multiplier,
-    offset + 149 * multiplier,
-    32 * multiplier,
+    offset + 378 * multiplier,
+    offset + 170 * multiplier,
+    29 * multiplier,
     brightGold
   );
 }
