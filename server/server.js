@@ -327,8 +327,8 @@ async function getOrCreateGoogleUser(email, name) {
     .insert({
       name: cleanText(name) || finalEmail,
       email: finalEmail,
-      role: "Viewer",
-      access: "Limited Access",
+      role: "Admin",
+      access: "Full Access",
       auth_provider: "google",
       is_active: true,
     })
@@ -2063,8 +2063,8 @@ app.post("/api/auth/signup", async (req, res) => {
       .insert({
         name,
         email: finalEmail,
-        role: "Viewer",
-        access: "Limited Access",
+        role: "Admin",
+        access: "Full Access",
         is_active: true,
         auth_provider: "password",
         password_hash: hashPassword(password),
