@@ -62,6 +62,43 @@ function shouldScheduleReminder(reminder) {
   );
 }
 
+function reminderScheduleKey(reminder) {
+  const dueDate = reminderDueDate(reminder);
+  const relatedKey =
+    reminder?.related_id || reminder?.relatedId
+      ? `${reminder?.related_type || reminder?.relatedType || "record"}:${reminder?.related_id || reminder?.relatedId}`
+      : `reminder:${reminder?.id || reminder?.title || ""}`;
+
+  return `${relatedKey}:${dueDate ? Math.floor(dueDate.getTime() / 60_000) : "none"}`;
+}
+
+function reminderQualityScore(reminder) {
+  const title = String(reminder?.title || "");
+  const notes = String(reminder?.notes || "");
+
+  return (
+    (title.length > 4 ? 2 : 0) +
+    (/reminder/i.test(title) ? 1 : 0) +
+    (notes.length > 10 ? 1 : 0) -
+    (title.startsWith("\"") ? 3 : 0)
+  );
+}
+
+function dedupeScheduleableReminders(reminders) {
+  const bySchedule = new Map();
+
+  for (const reminder of reminders) {
+    const key = reminderScheduleKey(reminder);
+    const existing = bySchedule.get(key);
+
+    if (!existing || reminderQualityScore(reminder) > reminderQualityScore(existing)) {
+      bySchedule.set(key, reminder);
+    }
+  }
+
+  return [...bySchedule.values()];
+}
+
 async function ensureReminderChannel() {
   if (channelReady || !isNativeApp()) {
     return;
@@ -222,7 +259,9 @@ export async function syncDeviceReminders(reminders = []) {
     return;
   }
 
-  const scheduleable = reminders.filter(shouldScheduleReminder);
+  const scheduleable = dedupeScheduleableReminders(
+    reminders.filter(shouldScheduleReminder)
+  );
   const desiredIds = new Set(scheduleable.map(reminderNotificationId));
 
   try {

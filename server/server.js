@@ -11,6 +11,9 @@ import { askAI } from "./aiService.js";
 
 dotenv.config({ path: "./server/.env" });
 
+const APP_TIME_ZONE = process.env.APP_TIME_ZONE || "Africa/Lagos";
+process.env.TZ ||= APP_TIME_ZONE;
+
 const { supabaseAdmin } = await import("./supabaseClient.js");
 
 const app = express();
@@ -61,6 +64,20 @@ const GMAIL_OAUTH_SCOPES = [
 const transcriptionTickets = new Map();
 const PASSWORD_ITERATIONS = 310000;
 const PASSWORD_KEY_LENGTH = 32;
+
+function currentDateContextForPrompt() {
+  const now = new Date();
+
+  return [
+    `Current UTC date/time: ${now.toISOString()}`,
+    `Current local date/time (${APP_TIME_ZONE}): ${now.toLocaleString("en-US", {
+      timeZone: APP_TIME_ZONE,
+      dateStyle: "full",
+      timeStyle: "medium",
+    })}`,
+    `Use ${APP_TIME_ZONE} as the local timezone for spoken times unless the user explicitly says another timezone.`,
+  ].join("\n");
+}
 
 if (process.env.TRUST_PROXY === "true" || process.env.NODE_ENV === "production") {
   app.set("trust proxy", 1);
@@ -1391,6 +1408,12 @@ function resolveAlarmDueAt(reminderTime, relatedRecord, fallbackText = "") {
 }
 
 function resolveMeetingStartDate(data, command) {
+  const commandDate = parseDateTimeLike(command);
+
+  if (commandDate) {
+    return commandDate;
+  }
+
   for (const value of [
     data?.start_at,
     data?.startAt,
@@ -2696,6 +2719,7 @@ app.post("/api/calendar/assistant", requireRole(...ADMIN_ROLES), async (req, res
 You are the AI Schedule Assistant for Executive Virtual AI Assistant.
 Return JSON only. No markdown.
 Current date/time: ${new Date().toISOString()}
+${currentDateContextForPrompt()}
 
 Parse this schedule request:
 ${command}
@@ -2727,13 +2751,18 @@ If a required date/time is missing, put that field in needs_clarification.
     }
 
     const fallbackParsed = buildFallbackSchedulePlan(command);
+    const fallbackHasStart = Boolean(fallbackParsed.start_at);
     parsed = {
       ...fallbackParsed,
       ...parsed,
       title: cleanText(parsed.title) || fallbackParsed.title,
       description: cleanText(parsed.description) || fallbackParsed.description,
-      start_at: cleanText(parsed.start_at) || fallbackParsed.start_at,
-      end_at: cleanText(parsed.end_at) || fallbackParsed.end_at,
+      start_at: fallbackHasStart
+        ? fallbackParsed.start_at
+        : cleanText(parsed.start_at) || fallbackParsed.start_at,
+      end_at: fallbackHasStart
+        ? fallbackParsed.end_at
+        : cleanText(parsed.end_at) || fallbackParsed.end_at,
       alarm_minutes_before:
         parsed.alarm_minutes_before ?? fallbackParsed.alarm_minutes_before,
       needs_clarification: fallbackParsed.start_at
@@ -4217,7 +4246,7 @@ Supported action types:
 - partner
 - general_ai
 
-Current date/time: ${new Date().toISOString()}
+${currentDateContextForPrompt()}
 
 Required JSON shape:
 {

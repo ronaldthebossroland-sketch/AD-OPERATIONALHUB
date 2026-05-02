@@ -482,6 +482,33 @@ export default function ADOperationalHub() {
       const currentReminder = reminders.find(
         (reminder) => reminder.id === notification.recordId
       );
+      const relatedReminderIds = new Set(
+        reminders
+          .filter((reminder) => {
+            if (reminder.id === notification.recordId) {
+              return true;
+            }
+
+            if (
+              !currentReminder?.related_id ||
+              reminder.related_id !== currentReminder.related_id ||
+              reminder.related_type !== currentReminder.related_type
+            ) {
+              return false;
+            }
+
+            const currentDue = new Date(currentReminder.due_at).getTime();
+            const reminderDue = new Date(reminder.due_at).getTime();
+
+            return (
+              Number.isFinite(currentDue) &&
+              Number.isFinite(reminderDue) &&
+              Math.abs(currentDue - reminderDue) < 60_000
+            );
+          })
+          .map((reminder) => reminder.id)
+      );
+      relatedReminderIds.add(notification.recordId);
       const completedReminder = {
         ...(currentReminder || {}),
         id: notification.recordId,
@@ -491,24 +518,66 @@ export default function ADOperationalHub() {
 
       setReminders((previous) =>
         previous.map((reminder) =>
-          reminder.id === notification.recordId ? completedReminder : reminder
+          relatedReminderIds.has(reminder.id)
+            ? { ...reminder, status: "Completed", snoozed_until: null }
+            : reminder
         )
       );
-      cancelDeviceReminder(currentReminder || completedReminder).catch((error) => {
-        console.warn("Could not cancel device reminder:", error);
-      });
+      reminders
+        .filter((reminder) => relatedReminderIds.has(reminder.id))
+        .forEach((reminder) => {
+          cancelDeviceReminder(reminder).catch((error) => {
+            console.warn("Could not cancel device reminder:", error);
+          });
+        });
 
-      const data = await updateAlarm(notification.recordId, {
-        status: "Completed",
-        snoozed_until: null,
-      });
+      const completedUpdates = await Promise.all(
+        [...relatedReminderIds].map((reminderId) =>
+          updateAlarm(reminderId, {
+            status: "Completed",
+            snoozed_until: null,
+          })
+        )
+      );
 
-      if (data.ok && data.alarm) {
+      const updatedAlarms = completedUpdates
+        .filter((data) => data.ok && data.alarm)
+        .map((data) => data.alarm);
+
+      if (updatedAlarms.length > 0) {
         setReminders((previous) =>
           previous.map((reminder) =>
-            reminder.id === data.alarm.id ? data.alarm : reminder
+            updatedAlarms.find((alarm) => alarm.id === reminder.id) || reminder
           )
         );
+      }
+
+      if (currentReminder?.related_type === "meeting" && currentReminder.related_id) {
+        setMeetings((previous) =>
+          previous.map((meeting) =>
+            meeting.id === currentReminder.related_id
+              ? { ...meeting, status: "Completed" }
+              : meeting
+          )
+        );
+
+        const meetingData = await updateMeeting(currentReminder.related_id, {
+          status: "Completed",
+        });
+
+        if (meetingData.ok && meetingData.meeting) {
+          setMeetings((previous) =>
+            previous.map((meeting) =>
+              meeting.id === meetingData.meeting.id ? meetingData.meeting : meeting
+            )
+          );
+        }
+      }
+
+      if (relatedReminderIds.size === 0) {
+        cancelDeviceReminder(currentReminder || completedReminder).catch((error) => {
+          console.warn("Could not cancel device reminder:", error);
+        });
       }
       return;
     }
