@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { ShieldAlert } from "lucide-react";
 
 import AuthCallbackPage from "./components/auth/AuthCallbackPage";
+import LegalPage from "./components/auth/LegalPage";
 import LoginPage from "./components/auth/LoginPage";
 import Header from "./components/layout/Header";
 import Sidebar from "./components/layout/Sidebar";
@@ -73,6 +74,14 @@ function getInitialActiveView() {
   return viewAccess[requestedView] ? requestedView : "assistant";
 }
 
+function getPublicLegalPath() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.location.pathname.replace(/\/$/, "");
+}
+
 function canAccessView(user, view) {
   if (!user) {
     return false;
@@ -136,6 +145,9 @@ export default function ADOperationalHub() {
   const isAuthCallbackPath =
     typeof window !== "undefined" &&
     window.location.pathname === "/auth/callback";
+  const publicLegalPath = getPublicLegalPath();
+  const isPublicLegalPath =
+    publicLegalPath === "/privacy" || publicLegalPath === "/terms";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -724,6 +736,12 @@ export default function ADOperationalHub() {
       return <AuthCallbackPage onAuthenticated={handleAuthComplete} />;
     }
 
+    if (isPublicLegalPath) {
+      return (
+        <LegalPage type={publicLegalPath === "/terms" ? "terms" : "privacy"} />
+      );
+    }
+
     return (
       <AppSplashScreen
         message={
@@ -737,6 +755,12 @@ export default function ADOperationalHub() {
 
   if (isAuthCallbackPath) {
     return <AuthCallbackPage onAuthenticated={handleAuthComplete} />;
+  }
+
+  if (isPublicLegalPath) {
+    return (
+      <LegalPage type={publicLegalPath === "/terms" ? "terms" : "privacy"} />
+    );
   }
 
   if (!currentUser) {

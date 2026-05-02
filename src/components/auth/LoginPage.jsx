@@ -144,6 +144,9 @@ export default function LoginPage({ onLogin }) {
             className="luxury-logo h-14 w-14 shrink-0 rounded-2xl shadow-sm"
           />
           <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">
+              AD Operational Hub
+            </p>
             <h1 className="break-words text-lg font-black sm:text-xl">
               Executive Virtual AI Assistant
             </h1>
@@ -319,6 +322,16 @@ export default function LoginPage({ onLogin }) {
             {kingsChatStatus}
           </p>
         ) : null}
+
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 border-t border-slate-200 pt-4 text-xs font-black text-slate-500">
+          <a className="hover:text-blue-700" href="/privacy">
+            Privacy Policy
+          </a>
+          <span className="text-slate-300">/</span>
+          <a className="hover:text-blue-700" href="/terms">
+            Terms of Service
+          </a>
+        </div>
       </div>
     </div>
   );
