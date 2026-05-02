@@ -23,7 +23,120 @@ const GOOGLE_LOGIN_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.send",
 ].join(" ");
+const GOOGLE_PROVIDER_AUTH_STORAGE_KEY = "eva_google_provider_auth";
 const AuthBrowser = registerPlugin("AuthBrowser");
+
+function cleanString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeEmail(value) {
+  return cleanString(value).toLowerCase();
+}
+
+function getProviderExpiry(providerAuth = {}) {
+  const parsedExpiresAt = Number.parseInt(providerAuth.tokenExpiresAt, 10);
+
+  if (!Number.isNaN(parsedExpiresAt) && parsedExpiresAt > 0) {
+    return parsedExpiresAt < 1000000000000
+      ? parsedExpiresAt * 1000
+      : parsedExpiresAt;
+  }
+
+  const parsedExpiresIn = Number.parseInt(providerAuth.tokenExpiresIn, 10);
+
+  if (!Number.isNaN(parsedExpiresIn) && parsedExpiresIn > 0) {
+    return Date.now() + parsedExpiresIn * 1000;
+  }
+
+  return null;
+}
+
+function normalizeGoogleProviderAuth(providerAuth = {}, email = "") {
+  const providerToken = cleanString(providerAuth.providerToken);
+  const providerRefreshToken = cleanString(providerAuth.providerRefreshToken);
+  const providerScope =
+    cleanString(providerAuth.providerScope) ||
+    (providerToken || providerRefreshToken ? GOOGLE_LOGIN_SCOPES : "");
+  const tokenExpiresAt = getProviderExpiry(providerAuth);
+
+  if (!providerToken && !providerRefreshToken) {
+    return null;
+  }
+
+  return {
+    ...(email ? { email: normalizeEmail(email) } : {}),
+    ...(providerToken ? { providerToken } : {}),
+    ...(providerRefreshToken ? { providerRefreshToken } : {}),
+    ...(providerScope ? { providerScope } : {}),
+    ...(tokenExpiresAt ? { tokenExpiresAt: String(tokenExpiresAt) } : {}),
+  };
+}
+
+function hasGmailProviderScope(providerAuth) {
+  return cleanString(providerAuth?.providerScope)
+    .split(/\s+/)
+    .includes("https://www.googleapis.com/auth/gmail.readonly");
+}
+
+function readStoredGoogleProviderAuth(expectedEmail = "") {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return null;
+  }
+
+  try {
+    const stored = JSON.parse(
+      window.localStorage.getItem(GOOGLE_PROVIDER_AUTH_STORAGE_KEY) || "null"
+    );
+    const storedEmail = normalizeEmail(stored?.email);
+    const finalExpectedEmail = normalizeEmail(expectedEmail);
+
+    if (finalExpectedEmail && storedEmail !== finalExpectedEmail) {
+      return null;
+    }
+
+    return normalizeGoogleProviderAuth(stored, storedEmail);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredGoogleProviderAuth(providerAuth, email = "") {
+  if (
+    typeof window === "undefined" ||
+    !window.localStorage ||
+    !hasGmailProviderScope(providerAuth)
+  ) {
+    return;
+  }
+
+  const nextProviderAuth = normalizeGoogleProviderAuth(providerAuth, email);
+
+  if (!nextProviderAuth) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      GOOGLE_PROVIDER_AUTH_STORAGE_KEY,
+      JSON.stringify(nextProviderAuth)
+    );
+  } catch {
+    // Local persistence is best-effort; the app can still use the live session.
+  }
+}
+
+function clearStoredGoogleProviderAuth() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(GOOGLE_PROVIDER_AUTH_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
 
 function ensureHttpAuthUrl(url) {
   const parsedUrl = new URL(url);
@@ -147,19 +260,36 @@ async function syncAppSessionFromSupabase(providerAuth = {}) {
     return null;
   }
 
+  const sessionEmail = normalizeEmail(data.session?.user?.email);
+  const freshProviderAuth = normalizeGoogleProviderAuth(
+    providerAuth,
+    sessionEmail
+  );
+  const sessionProviderAuth = normalizeGoogleProviderAuth(
+    {
+      providerRefreshToken: data.session.provider_refresh_token,
+      providerScope: freshProviderAuth?.providerScope,
+      providerToken: data.session.provider_token,
+    },
+    sessionEmail
+  );
+  const storedProviderAuth = readStoredGoogleProviderAuth(sessionEmail);
+  const liveProviderAuth = freshProviderAuth || sessionProviderAuth;
+  const googleProviderAuth = liveProviderAuth || storedProviderAuth || {};
   const result = await loginWithSupabaseToken(accessToken, {
-    googleProviderExpiresAt: providerAuth.tokenExpiresAt,
-    googleProviderExpiresIn: providerAuth.tokenExpiresIn,
+    googleProviderExpiresAt: googleProviderAuth.tokenExpiresAt,
     googleProviderRefreshToken:
-      providerAuth.providerRefreshToken ||
-      data.session.provider_refresh_token,
-    googleProviderScope: providerAuth.providerScope,
-    googleProviderToken:
-      providerAuth.providerToken || data.session.provider_token,
+      googleProviderAuth.providerRefreshToken,
+    googleProviderScope: googleProviderAuth.providerScope,
+    googleProviderToken: googleProviderAuth.providerToken,
   });
 
   if (!result.ok) {
     throw new Error(result.error || "Could not finish Google sign-in.");
+  }
+
+  if (result.gmailConnected && liveProviderAuth) {
+    writeStoredGoogleProviderAuth(liveProviderAuth, sessionEmail);
   }
 
   return result.user || null;
@@ -306,6 +436,7 @@ export async function syncSupabaseAuthSession() {
 
 export async function signOutSupabaseAuth() {
   if (!isSupabaseAuthConfigured || !supabase) {
+    clearStoredGoogleProviderAuth();
     return;
   }
 
@@ -314,6 +445,8 @@ export async function signOutSupabaseAuth() {
   if (error) {
     throw error;
   }
+
+  clearStoredGoogleProviderAuth();
 }
 
 export async function connectGmailWithGoogle() {

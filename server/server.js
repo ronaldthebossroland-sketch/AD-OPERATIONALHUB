@@ -856,14 +856,14 @@ function getGoogleProviderTokens(body) {
   const providerToken = cleanText(
     body.googleProviderToken || body.providerToken
   );
-
-  if (!providerToken) {
-    return null;
-  }
-
   const providerRefreshToken = cleanText(
     body.googleProviderRefreshToken || body.providerRefreshToken
   );
+
+  if (!providerToken && !providerRefreshToken) {
+    return null;
+  }
+
   const providerScope =
     cleanText(body.googleProviderScope || body.providerScope) ||
     GOOGLE_LOGIN_SCOPES.join(" ");
@@ -873,7 +873,7 @@ function getGoogleProviderTokens(body) {
   );
 
   return {
-    access_token: providerToken,
+    ...(providerToken ? { access_token: providerToken } : {}),
     ...(providerRefreshToken ? { refresh_token: providerRefreshToken } : {}),
     ...(expiryDate ? { expiry_date: expiryDate } : {}),
     scope: providerScope,
@@ -898,12 +898,16 @@ async function attachGmailTokensFromProvider(req, expectedEmail) {
     throw new Error("Google Gmail account must match the signed-in account.");
   }
 
-  req.session.tokens = tokens;
+  req.session.tokens = {
+    ...tokens,
+    ...oauth2Client.credentials,
+    scope: tokens.scope || oauth2Client.credentials.scope,
+  };
   req.session.gmail = {
     connectedAt: new Date().toISOString(),
     connectedEmail: profileEmail,
-    readEnabled: hasGmailReadScope(tokens),
-    sendEnabled: hasGmailSendScope(tokens),
+    readEnabled: hasGmailReadScope(req.session.tokens),
+    sendEnabled: hasGmailSendScope(req.session.tokens),
   };
 
   return true;
