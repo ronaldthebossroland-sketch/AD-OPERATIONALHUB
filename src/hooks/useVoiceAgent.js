@@ -8,7 +8,7 @@ import {
   TRANSCRIPTION_WS_URL,
 } from "../services/api";
 
-const AUTO_FINALIZE_MS = 1800;
+const AUTO_FINALIZE_MS = 2400;
 
 const completedStatuses = new Set([
   "created",
@@ -696,6 +696,64 @@ function extractReminderLead(text) {
   return "";
 }
 
+function extractImplicitMinuteReminderLead(text) {
+  const cleanTextValue = cleanVoiceText(text)
+    .toLowerCase()
+    .replace(/\b(about|around|just|please|before|early|earlier|ahead|prior)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const numberWordPattern = [
+    "a",
+    "an",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "thirty",
+    "forty",
+    "fourty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+    "hundred",
+    "thousand",
+    "couple",
+    "few",
+    "half",
+    "quarter",
+    "and",
+    "of",
+  ].join("|");
+  const match =
+    cleanTextValue.match(/^(\d+(?:\.\d+)?)$/) ||
+    cleanTextValue.match(new RegExp(`^((?:(?:${numberWordPattern})\\s*)+)$`, "i"));
+
+  if (!match) {
+    return "";
+  }
+
+  return formatReminderLead(parseReminderAmount(match[1]), "minutes");
+}
+
 function extractExplicitReminderTimePhrase(text) {
   const cleanTextValue = cleanVoiceText(text);
   const reminderTimeMatch =
@@ -833,11 +891,12 @@ function updateMeetingConversation(conversation, reply) {
 
   if (conversation.asking === "reminder") {
     const preference = getReminderPreference(cleanReply);
+    const implicitLead = extractImplicitMinuteReminderLead(cleanReply);
     const absoluteReminderTime = hasDateOrTime(cleanReply)
       ? preference.absoluteTime || extractMeetingTimePhrase(cleanReply)
       : "";
 
-    if (preference.wantsReminder === null && !absoluteReminderTime) {
+    if (preference.wantsReminder === null && !absoluteReminderTime && !implicitLead) {
       return {
         conversation: nextConversation,
         question: "Should I add a reminder for this meeting?",
@@ -846,7 +905,7 @@ function updateMeetingConversation(conversation, reply) {
 
     nextConversation.wantsReminder =
       preference.wantsReminder === null ? true : preference.wantsReminder;
-    nextConversation.reminderLead = preference.lead;
+    nextConversation.reminderLead = preference.lead || implicitLead;
     nextConversation.reminderTimeDetails = absoluteReminderTime
       ? mergeTimeDetails(nextConversation.reminderTimeDetails, absoluteReminderTime)
       : null;
@@ -861,7 +920,9 @@ function updateMeetingConversation(conversation, reply) {
       nextConversation.reminderLead = "";
       nextConversation.reminderTimeDetails = null;
     } else {
-      const lead = extractReminderLead(cleanReply);
+      const lead =
+        extractReminderLead(cleanReply) ||
+        extractImplicitMinuteReminderLead(cleanReply);
       const absoluteReminderTime = hasDateOrTime(cleanReply)
         ? extractMeetingTimePhrase(cleanReply)
         : "";
@@ -1358,6 +1419,61 @@ function buildPartnerConversationCommand(conversation) {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function conversationNeedsConfirmation(conversation) {
+  return ["meeting", "reminder", "task", "operation", "partner"].includes(
+    conversation?.type
+  );
+}
+
+function confirmationQuestionForConversation(conversation) {
+  if (conversation.type === "meeting") {
+    const time =
+      buildResolvedTimePhrase(conversation.timeDetails) ||
+      conversation.time ||
+      "the selected time";
+    const reminderLead =
+      cleanVoiceText(conversation.reminderLead) ||
+      buildReminderLeadFromDetails(conversation.reminderTimeDetails);
+    const reminderText = conversation.wantsReminder
+      ? `with a reminder ${reminderLead}`
+      : "with no reminder";
+
+    return `Just to confirm: create "${conversation.title}" for ${time}, ${reminderText}. Should I create it?`;
+  }
+
+  if (conversation.type === "reminder") {
+    const time =
+      buildResolvedTimePhrase(conversation.timeDetails) ||
+      conversation.time ||
+      "the selected time";
+
+    return `Just to confirm: remind you about "${conversation.title}" at ${time}. Should I create it?`;
+  }
+
+  if (conversation.type === "task") {
+    const deadline = conversation.deadline || "no deadline";
+    const owner = conversation.owner || "no owner";
+    const detail = conversation.detail || "no extra detail";
+
+    return `Just to confirm: create task "${conversation.title}", due ${deadline}, priority ${conversation.priority || "Medium"}, owner ${owner}, with ${detail}. Should I create it?`;
+  }
+
+  if (conversation.type === "operation") {
+    const due = conversation.due || "no deadline";
+
+    return `Just to confirm: create operation alert "${conversation.title}", severity ${conversation.severity || "Medium"}, due ${due}. Should I create it?`;
+  }
+
+  if (conversation.type === "partner") {
+    const email = conversation.email || "no email";
+    const nextStep = conversation.nextStep || "no next step";
+
+    return `Just to confirm: create partner "${conversation.name}", email ${email}, next step ${nextStep}. Should I create it?`;
+  }
+
+  return "Just to confirm, should I create it?";
 }
 
 function hasSoftTranscriptionIntent(command) {
@@ -1880,6 +1996,28 @@ export default function useVoiceAgent({
   }
 
   function updatePendingConversation(conversation, reply) {
+    if (conversation.asking === "confirm" && conversation.type !== "transcription") {
+      if (isNegativeReply(reply)) {
+        return {
+          conversation,
+          question: "",
+          cancelled: true,
+        };
+      }
+
+      if (isPositiveReply(reply)) {
+        return {
+          conversation: { ...conversation, confirmed: true },
+          question: "",
+        };
+      }
+
+      return {
+        conversation,
+        question: "Please say yes to create it, or no to cancel.",
+      };
+    }
+
     if (conversation.type === "meeting") {
       return updateMeetingConversation(conversation, reply);
     }
@@ -1972,6 +2110,20 @@ export default function useVoiceAgent({
       return true;
     }
 
+    if (
+      conversationNeedsConfirmation(update.conversation) &&
+      !update.conversation.confirmed
+    ) {
+      const confirmationConversation = {
+        ...update.conversation,
+        asking: "confirm",
+      };
+
+      setPendingConversation(confirmationConversation);
+      await respond(confirmationQuestionForConversation(confirmationConversation));
+      return true;
+    }
+
     await executeCommandText(update.command || commandForConversation(update.conversation));
     return true;
   }
@@ -2045,6 +2197,17 @@ export default function useVoiceAgent({
     }
 
     setPendingConversation(null);
+    if (conversationNeedsConfirmation(conversation)) {
+      const confirmationConversation = {
+        ...conversation,
+        asking: "confirm",
+      };
+
+      setPendingConversation(confirmationConversation);
+      await respond(confirmationQuestionForConversation(confirmationConversation));
+      return true;
+    }
+
     await executeCommandText(commandForConversation(conversation));
     return true;
   }
