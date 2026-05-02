@@ -5,7 +5,7 @@ import {
   ShieldCheck,
   UserPlus,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import kingsChatWebSdk from "kingschat-web-sdk";
 import "kingschat-web-sdk/dist/stylesheets/style.min.css";
 
@@ -32,16 +32,23 @@ export default function LoginPage({ onLogin }) {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [kingsChatError, setKingsChatError] = useState("");
   const [kingsChatStatus, setKingsChatStatus] = useState("");
+  const authRequestInFlight = useRef(false);
   const kingsChatClientId = import.meta.env.VITE_KINGSCHAT_CLIENT_ID;
   const isKingsChatConfigured = Boolean(kingsChatClientId);
   const isCreatingAccount = authMode === "signup";
 
   function updateAuthForm(field, value) {
+    setAuthError("");
     setAuthForm((previous) => ({ ...previous, [field]: value }));
   }
 
   async function handlePasswordAuth(event) {
     event.preventDefault();
+
+    if (authRequestInFlight.current) {
+      return;
+    }
+
     setAuthError("");
 
     if (!authForm.email.trim() || !authForm.password) {
@@ -55,6 +62,7 @@ export default function LoginPage({ onLogin }) {
     }
 
     try {
+      authRequestInFlight.current = true;
       setAuthLoading(true);
       const data = isCreatingAccount
         ? await signupUser(authForm)
@@ -70,6 +78,7 @@ export default function LoginPage({ onLogin }) {
     } catch {
       setAuthError("Could not reach the login server.");
     } finally {
+      authRequestInFlight.current = false;
       setAuthLoading(false);
     }
   }
@@ -198,6 +207,7 @@ export default function LoginPage({ onLogin }) {
               value={authForm.name}
               onChange={(event) => updateAuthForm("name", event.target.value)}
               placeholder="Name"
+              autoComplete="name"
               className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
             />
           )}
@@ -207,6 +217,9 @@ export default function LoginPage({ onLogin }) {
             onChange={(event) => updateAuthForm("email", event.target.value)}
             placeholder="Email"
             type="email"
+            autoCapitalize="none"
+            autoComplete="email"
+            autoCorrect="off"
             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
           />
 
@@ -215,6 +228,9 @@ export default function LoginPage({ onLogin }) {
             onChange={(event) => updateAuthForm("password", event.target.value)}
             placeholder="Password"
             type="password"
+            autoComplete={
+              isCreatingAccount ? "new-password" : "current-password"
+            }
             className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
           />
 
