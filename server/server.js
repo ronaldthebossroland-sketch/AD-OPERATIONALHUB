@@ -3505,6 +3505,34 @@ function inferTaskDeadline(command) {
   return dueText;
 }
 
+function cleanTaskTitleCandidate(value) {
+  return cleanText(value)
+    .replace(/\s+\b(?:with\s+deadline|due(?:\s+date)?|deadline|by|on)\b.+$/i, "")
+    .replace(/\s+\b(?:priority|owner|detail|details|note|notes|status)\b.+$/i, "")
+    .replace(/\b(?:for\s+)?me\b/gi, "")
+    .replace(/\b(?:and\s+)?(?:the\s+)?$/i, "")
+    .replace(/^(to|for)\s+/i, "")
+    .trim();
+}
+
+function isGenericTaskTitle(title) {
+  const normalized = cleanText(title).toLowerCase();
+
+  if (!normalized) {
+    return true;
+  }
+
+  return (
+    /^(a|new|task|todo|to do|it|and|the)$/i.test(normalized) ||
+    /\b(set|create|add|make|log)\s+(?:a\s+)?(?:task|todo|to do|action item)\s+(?:for\s+)?me\b/i.test(
+      normalized
+    ) ||
+    /\b(i would love|i want|can you|could you|please)\b.*\b(task|todo|action item)\b/i.test(
+      normalized
+    )
+  );
+}
+
 function inferTaskTitle(command) {
   const cleanCommand = cleanText(command);
   const titledMatch = cleanCommand.match(
@@ -3513,12 +3541,9 @@ function inferTaskTitle(command) {
   const todoMatch = cleanCommand.match(
     /\b(?:task|todo|to do|action item)\s+(?:to|for)?\s*(.+?)(?:\s+(?:with\s+deadline|due|deadline|by|priority|owner)\b|[,.;]|$)/i
   );
-  const title = cleanText(titledMatch?.[1] || todoMatch?.[1] || "")
-    .replace(/\b(?:for\s+)?me\b/gi, "")
-    .replace(/\b(?:and\s+)?(?:the\s+)?$/i, "")
-    .trim();
+  const title = cleanTaskTitleCandidate(titledMatch?.[1] || todoMatch?.[1] || "");
 
-  if (!title || /^(a|new|task|todo|to do|it|and|the)$/i.test(title)) {
+  if (isGenericTaskTitle(title)) {
     return "";
   }
 
@@ -4811,9 +4836,11 @@ async function executeCommandAction(action, req, context, createdRecords, comman
     }
 
     if (action.type === "task") {
-      const title = cleanText(action.data?.title) || action.title;
+      const title = cleanTaskTitleCandidate(
+        cleanText(action.data?.title) || action.title
+      );
 
-      if (!title) {
+      if (!title || isGenericTaskTitle(title)) {
         return needsClarification(action, ["title"], "Task title is required.");
       }
 

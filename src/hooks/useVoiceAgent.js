@@ -913,7 +913,7 @@ function buildReminderConversationCommand(conversation) {
 }
 
 function hasTaskIntent(command) {
-  return /\b(create|add|make|set up)\b.*\b(task|todo|to do|action item)\b/i.test(command);
+  return /\b(create|add|make|set up|set|assign|log)\b.*\b(task|todo|to do|action item)\b/i.test(command);
 }
 
 function extractDatePhraseForRecord(text) {
@@ -933,18 +933,62 @@ function extractDuePhrase(text) {
   return extractDatePhraseForRecord(candidate);
 }
 
+function isGenericTaskTitle(title) {
+  const normalized = cleanVoiceText(title).toLowerCase();
+
+  if (!normalized) {
+    return true;
+  }
+
+  return (
+    /^(a|new|task|todo|to do|it|and|the)$/i.test(normalized) ||
+    /\b(set|create|add|make|log)\s+(?:a\s+)?(?:task|todo|to do|action item)\s+(?:for\s+)?me\b/i.test(
+      normalized
+    ) ||
+    /\b(i would love|i want|can you|could you|please)\b.*\b(task|todo|action item)\b/i.test(
+      normalized
+    )
+  );
+}
+
+function extractTaskOwner(text) {
+  const match = cleanVoiceText(text).match(
+    /\b(?:owner|owned by|assign(?:ed)? to|for)\s+(?:is\s+|should\s+be\s+)?(.+?)(?:\s+(?:due|deadline|priority|detail|details|notes?|status)\b|[,.;]|$)/i
+  );
+  const owner = cleanVoiceText(match?.[1])
+    .replace(/^me$/i, "Me")
+    .trim();
+
+  return /^(task|todo|it)$/i.test(owner) ? "" : owner;
+}
+
+function extractTaskDetail(text) {
+  const cleanTextValue = cleanVoiceText(text);
+  const match = cleanTextValue.match(
+    /\b(?:detail|details|note|notes|description)\s*(?:is|are|should\s+be|:)?\s+(.+?)(?:\s+(?:due|deadline|priority|owner|status)\b|[,.;]|$)/i
+  );
+
+  return cleanVoiceText(match?.[1]);
+}
+
+function cleanTaskTitleCandidate(text) {
+  return cleanVoiceText(text)
+    .replace(/\s+\b(?:with\s+deadline|due(?:\s+date)?|deadline|by|on)\b.+$/i, "")
+    .replace(/\s+\b(?:priority|owner|detail|details|note|notes|status)\b.+$/i, "")
+    .replace(/\b(?:for\s+)?me\b/gi, "")
+    .replace(/\b(?:and\s+)?(?:the\s+)?$/i, "")
+    .replace(/^(to|for)\s+/i, "")
+    .trim();
+}
+
 function extractTaskTitle(command) {
   const cleanCommand = cleanVoiceText(command);
   const match = cleanCommand.match(
     /\b(?:task|todo|to do|action item)\s+(?:to|for|called|titled)?\s*(.+?)(?:\s+(?:with\s+deadline|by|due(?:\s+date)?|deadline|priority|owner)\b|[,.;]|$)/i
   );
-  const title = cleanVoiceText(match?.[1])
-    .replace(/\b(?:for\s+)?me\b/gi, "")
-    .replace(/\b(?:and\s+)?(?:the\s+)?$/i, "")
-    .replace(/^(to|for)\s+/i, "")
-    .trim();
+  const title = cleanTaskTitleCandidate(match?.[1]);
 
-  return /^(a|new|task|todo|to do|it|and|the)$/i.test(title) ? "" : title;
+  return isGenericTaskTitle(title) ? "" : title;
 }
 
 function createTaskConversation(command) {
@@ -953,6 +997,8 @@ function createTaskConversation(command) {
     title: extractTaskTitle(command),
     deadline: extractDuePhrase(command) || null,
     priority: extractPriority(command),
+    owner: extractTaskOwner(command) || null,
+    detail: extractTaskDetail(command) || null,
     asking: "",
   };
 }
@@ -970,6 +1016,14 @@ function getNextTaskStep(conversation) {
     return { asking: "priority", question: "What priority should I use: high, medium, or low?" };
   }
 
+  if (conversation.owner === undefined || conversation.owner === null) {
+    return { asking: "owner", question: "Who owns this task? You can say me or no owner." };
+  }
+
+  if (conversation.detail === undefined || conversation.detail === null) {
+    return { asking: "detail", question: "Any extra detail for the task? You can say no details." };
+  }
+
   return null;
 }
 
@@ -978,7 +1032,12 @@ function updateTaskConversation(conversation, reply) {
   const cleanReply = cleanVoiceText(reply);
 
   if (conversation.asking === "title") {
-    nextConversation.title = cleanReply;
+    nextConversation.title =
+      extractTaskTitle(cleanReply) || cleanTaskTitleCandidate(cleanReply) || cleanReply;
+    nextConversation.deadline ||= extractDuePhrase(cleanReply) || null;
+    nextConversation.priority ||= extractPriority(cleanReply);
+    nextConversation.owner ||= extractTaskOwner(cleanReply) || null;
+    nextConversation.detail ||= extractTaskDetail(cleanReply) || null;
   }
 
   if (conversation.asking === "deadline") {
@@ -989,6 +1048,18 @@ function updateTaskConversation(conversation, reply) {
 
   if (conversation.asking === "priority") {
     nextConversation.priority = extractPriority(cleanReply, "Medium");
+  }
+
+  if (conversation.asking === "owner") {
+    nextConversation.owner = noOptionalValue(cleanReply)
+      ? ""
+      : extractTaskOwner(cleanReply) || cleanReply;
+  }
+
+  if (conversation.asking === "detail") {
+    nextConversation.detail = noOptionalValue(cleanReply)
+      ? ""
+      : extractTaskDetail(cleanReply) || cleanReply;
   }
 
   const nextStep = getNextTaskStep(nextConversation);
@@ -1005,6 +1076,8 @@ function buildTaskConversationCommand(conversation) {
     `Create a task titled "${conversation.title}"`,
     conversation.deadline ? `with deadline ${conversation.deadline}` : "with no deadline",
     `and priority ${conversation.priority || "Medium"}.`,
+    conversation.owner ? `Owner: ${conversation.owner}.` : "No owner.",
+    conversation.detail ? `Detail: ${conversation.detail}.` : "No extra detail.",
   ].join(" ");
 }
 
