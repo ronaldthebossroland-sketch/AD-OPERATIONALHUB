@@ -36,8 +36,10 @@
     min-height: 100dvh;
     place-items: center;
     overflow: hidden;
-    background: #f7f7f4;
-    color: #111827;
+    background:
+      linear-gradient(135deg, #f6f7ff 0 60%, #eeeaff 60% 90%, #fff3e2 90% 100%),
+      #f6f7ff;
+    color: #20212a;
     isolation: isolate;
   }
 
@@ -92,7 +94,7 @@
     height: clamp(104px, 18vw, 148px);
     width: clamp(104px, 18vw, 148px);
     border-radius: 32px;
-    filter: drop-shadow(0 18px 28px rgba(17, 24, 39, 0.14));
+    filter: drop-shadow(0 18px 28px rgba(32, 33, 42, 0.14));
   }
 
   .app-splash__orbit {
@@ -103,15 +105,15 @@
   }
 
   .app-splash__orbit--gold {
-    border: 1px solid rgba(17, 24, 39, 0.14);
-    border-top-color: rgba(17, 24, 39, 0.38);
+    border: 1px solid rgba(32, 33, 42, 0.12);
+    border-top-color: rgba(124, 99, 255, 0.42);
     transform: rotate(18deg);
   }
 
   .app-splash__orbit--cyan {
     inset: 34px;
-    border: 1px solid rgba(20, 83, 45, 0.12);
-    border-right-color: rgba(20, 83, 45, 0.34);
+    border: 1px solid rgba(32, 33, 42, 0.1);
+    border-right-color: rgba(255, 159, 67, 0.45);
     transform: rotate(-24deg);
   }
 
@@ -121,14 +123,14 @@
   }
 
   .app-splash__eyebrow {
-    color: #14532d;
+    color: #7c63ff;
     font-size: 0.72rem;
     font-weight: 900;
     text-transform: uppercase;
   }
 
   .app-splash h1 {
-    color: #111827;
+    color: #20212a;
     font-size: clamp(1.72rem, 5vw, 3rem);
     font-weight: 950;
     line-height: 1.04;
@@ -139,7 +141,7 @@
   }
 
   .app-splash__copy p:last-child {
-    color: #667085;
+    color: #6f7485;
     font-size: clamp(0.95rem, 2.7vw, 1.08rem);
     font-weight: 700;
     line-height: 1.6;
@@ -152,9 +154,9 @@
   .app-splash__progress-track {
     height: 6px;
     overflow: hidden;
-    border: 1px solid rgba(17, 24, 39, 0.12);
+    border: 1px solid rgba(32, 33, 42, 0.12);
     border-radius: 999px;
-    background: rgba(17, 24, 39, 0.08);
+    background: rgba(124, 99, 255, 0.1);
     box-shadow: none;
   }
 
@@ -162,7 +164,9 @@
     height: 100%;
     width: 58%;
     border-radius: inherit;
-    background: #111827;
+    background:
+      linear-gradient(135deg, #20212a 0 78%, #7c63ff 78% 100%),
+      #20212a;
     box-shadow: none;
   }
 
