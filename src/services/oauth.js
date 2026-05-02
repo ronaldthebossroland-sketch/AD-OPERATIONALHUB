@@ -1,6 +1,6 @@
 import { App } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 
 import { API_BASE_URL, APP_HOME_URL, loginWithSupabaseToken } from "./api";
 import {
@@ -16,6 +16,31 @@ const GOOGLE_LOGIN_SCOPES = [
   "email",
   "profile",
 ].join(" ");
+const AuthBrowser = registerPlugin("AuthBrowser");
+
+function ensureHttpAuthUrl(url) {
+  const parsedUrl = new URL(url);
+
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    throw new Error("Google sign-in returned an invalid browser URL.");
+  }
+
+  return parsedUrl.href;
+}
+
+async function openNativeAuthUrl(url) {
+  const safeUrl = ensureHttpAuthUrl(url);
+
+  try {
+    await AuthBrowser.open({ url: safeUrl });
+  } catch (error) {
+    console.warn("Falling back to Capacitor Browser for OAuth:", error);
+    await Browser.open({
+      presentationStyle: "fullscreen",
+      url: safeUrl,
+    });
+  }
+}
 
 function ensureSupabaseAuth() {
   if (!isSupabaseAuthConfigured || !supabase) {
@@ -169,11 +194,7 @@ export async function signInWithGoogle() {
       throw new Error("Supabase did not return a Google sign-in URL.");
     }
 
-    await Browser.open({
-      presentationStyle: "fullscreen",
-      url: data.url,
-      windowName: "_self",
-    });
+    await openNativeAuthUrl(data.url);
   }
 
   return data;
@@ -304,11 +325,7 @@ export async function connectGmailWithGoogle() {
   )}`;
 
   if (Capacitor.isNativePlatform()) {
-    await Browser.open({
-      presentationStyle: "fullscreen",
-      url,
-      windowName: "_self",
-    });
+    await openNativeAuthUrl(url);
     return;
   }
 

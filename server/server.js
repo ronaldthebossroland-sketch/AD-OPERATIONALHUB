@@ -1625,9 +1625,32 @@ function startGmailOAuth(req, res) {
   }
 }
 
+function startGoogleLoginOAuth(req, res) {
+  try {
+    const oauth2Client = createGoogleClient();
+    const returnTo = getSafeAppReturnUrl(req.query.returnTo, "/");
+
+    const url = oauth2Client.generateAuthUrl({
+      access_type: "offline",
+      include_granted_scopes: true,
+      prompt: "consent select_account",
+      scope: GOOGLE_LOGIN_SCOPES,
+      state: encodeOAuthState({
+        flow: "login",
+        returnTo,
+      }),
+    });
+
+    res.redirect(url);
+  } catch (error) {
+    console.error("Google login auth error:", error);
+    res.status(500).send("Could not start Google sign-in.");
+  }
+}
+
 app.get("/auth/gmail", startGmailOAuth);
 
-app.get("/auth/google", startGmailOAuth);
+app.get("/auth/google", startGoogleLoginOAuth);
 
 app.get("/auth/google/callback", async (req, res) => {
   const state = decodeOAuthState(req.query.state);
