@@ -1175,27 +1175,191 @@ function formatDateTimeForMeeting(date) {
   });
 }
 
-function minutesBeforeValue(value) {
-  const match = cleanText(value).match(
-    /\b(\d+)\s*(minutes?|mins?|hours?|days?)\s+before\b/i
-  );
+const REMINDER_NUMBER_WORDS = {
+  zero: 0,
+  one: 1,
+  a: 1,
+  an: 1,
+  two: 2,
+  couple: 2,
+  three: 3,
+  few: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fourty: 40,
+  fifty: 50,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90,
+};
 
-  if (!match) {
+function parseReminderAmount(value) {
+  const cleanValue = cleanText(value)
+    .toLowerCase()
+    .replace(/-/g, " ")
+    .replace(/\band\b/g, " ")
+    .replace(/\bof\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleanValue) {
     return null;
   }
 
-  const amount = Number.parseInt(match[1], 10);
-  const unit = match[2].toLowerCase();
+  const numeric = Number.parseFloat(cleanValue);
 
-  if (unit.startsWith("hour")) {
-    return amount * 60;
+  if (Number.isFinite(numeric)) {
+    return numeric;
   }
 
-  if (unit.startsWith("day")) {
-    return amount * 24 * 60;
+  if (cleanValue === "half") {
+    return 0.5;
   }
 
-  return amount;
+  if (cleanValue === "quarter") {
+    return 0.25;
+  }
+
+  const tokens = cleanValue.split(" ");
+  const hasFraction = tokens.includes("half") || tokens.includes("quarter");
+  const hasScale = tokens.includes("hundred") || tokens.includes("thousand");
+  let total = 0;
+  let current = 0;
+  let matched = false;
+
+  for (const token of tokens) {
+    if ((token === "a" || token === "an") && hasFraction && !hasScale) {
+      continue;
+    }
+
+    if (token === "half") {
+      current += 0.5;
+      matched = true;
+      continue;
+    }
+
+    if (token === "quarter") {
+      current += 0.25;
+      matched = true;
+      continue;
+    }
+
+    if (token === "hundred") {
+      current = Math.max(current, 1) * 100;
+      matched = true;
+      continue;
+    }
+
+    if (token === "thousand") {
+      total += Math.max(current, 1) * 1000;
+      current = 0;
+      matched = true;
+      continue;
+    }
+
+    const wordValue = REMINDER_NUMBER_WORDS[token];
+
+    if (wordValue === undefined) {
+      continue;
+    }
+
+    current += wordValue;
+    matched = true;
+  }
+
+  return matched ? total + current : null;
+}
+
+function normalizeReminderUnit(unit) {
+  const cleanUnit = cleanText(unit).toLowerCase();
+
+  if (/^d(?:ay|ays)?$/.test(cleanUnit)) {
+    return "days";
+  }
+
+  if (/^h(?:our|ours|r|rs)?$/.test(cleanUnit)) {
+    return "hours";
+  }
+
+  if (/^(m|mins?|minu?t?e?s?|minues|mintes|mns?)$/.test(cleanUnit)) {
+    return "minutes";
+  }
+
+  return "";
+}
+
+function minutesFromReminderLead(amount, unit) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+
+  if (unit === "days") {
+    return Math.round(amount * 24 * 60);
+  }
+
+  if (unit === "hours") {
+    return Math.round(amount * 60);
+  }
+
+  if (unit === "minutes") {
+    return Math.round(amount);
+  }
+
+  return null;
+}
+
+function minutesBeforeValue(value) {
+  const text = cleanText(value);
+
+  if (/\b(?:a\s+)?quarter\s+(?:of\s+)?(?:an?\s+)?hour\b/i.test(text)) {
+    return 15;
+  }
+
+  if (/\b(?:a\s+)?half\s+(?:of\s+)?(?:an?\s+)?hour\b/i.test(text)) {
+    return 30;
+  }
+
+  const numericMatch = text.match(
+    /\b(\d+(?:\.\d+)?)\s*(m|mins?|minu?t?e?s?|minues|mintes|mns?|h|hrs?|hours?|d|days?)\b(?:\s*(?:before|early|earlier|ahead|prior|pre|notice|advance))?/i
+  );
+
+  if (numericMatch) {
+    return minutesFromReminderLead(
+      Number.parseFloat(numericMatch[1]),
+      normalizeReminderUnit(numericMatch[2])
+    );
+  }
+
+  const wordMatch = text.match(
+    /\b((?:(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fourty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|couple|few|half|quarter|and|of)[-\s]*)+)\s*(minutes?|mins?|minu?t?e?s?|minues|mintes|mns?|hours?|hrs?|days?)\b(?:\s*(?:before|early|earlier|ahead|prior|pre|notice|advance))?/i
+  );
+
+  if (wordMatch) {
+    return minutesFromReminderLead(
+      parseReminderAmount(wordMatch[1]),
+      normalizeReminderUnit(wordMatch[2])
+    );
+  }
+
+  return null;
 }
 
 function resolveAlarmDueAt(reminderTime, relatedRecord, fallbackText = "") {

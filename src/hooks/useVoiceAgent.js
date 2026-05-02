@@ -511,60 +511,189 @@ function extractMeetingTimePhrase(text) {
   return "";
 }
 
-function extractReminderLead(text) {
-  const cleanTextValue = cleanVoiceText(text);
+const reminderNumberWords = {
+  zero: 0,
+  one: 1,
+  a: 1,
+  an: 1,
+  two: 2,
+  couple: 2,
+  three: 3,
+  few: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fourty: 40,
+  fifty: 50,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90,
+};
 
-  if (/\b(a|one)\s+min(?:ute)?s?\s*(before|early|ahead|prior)?\b/i.test(cleanTextValue)) {
-    return "1 minute before";
+function parseReminderAmount(value) {
+  const cleanValue = cleanVoiceText(value)
+    .toLowerCase()
+    .replace(/-/g, " ")
+    .replace(/\band\b/g, " ")
+    .replace(/\bof\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleanValue) {
+    return null;
   }
 
-  if (/\bhalf\s+(an\s+)?hour\b/i.test(cleanTextValue)) {
-    return "30 minutes before";
+  const numeric = Number.parseFloat(cleanValue);
+
+  if (Number.isFinite(numeric)) {
+    return numeric;
   }
 
-  if (/\b(an|one)\s+hour\b/i.test(cleanTextValue)) {
-    return "1 hour before";
+  if (cleanValue === "half") {
+    return 0.5;
   }
 
-  const wordNumberMatch = cleanTextValue.match(
-    /\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(minutes?|mins?|hours?|hrs?|days?)\s*(before|early|ahead|prior)?\b/i
-  );
-  const wordNumbers = {
-    two: "2",
-    three: "3",
-    four: "4",
-    five: "5",
-    six: "6",
-    seven: "7",
-    eight: "8",
-    nine: "9",
-    ten: "10",
-    eleven: "11",
-    twelve: "12",
-  };
-
-  if (wordNumberMatch) {
-    const unit = wordNumberMatch[2]
-      .toLowerCase()
-      .replace(/^mins?$/, "minutes")
-      .replace(/^hrs?$/, "hours");
-
-    return `${wordNumbers[wordNumberMatch[1].toLowerCase()]} ${unit} before`;
+  if (cleanValue === "quarter") {
+    return 0.25;
   }
 
-  const match = cleanTextValue.match(
-    /\b(\d+)\s*(minutes?|mins?|hours?|hrs?|days?)\s*(before|early|ahead|prior)?\b/i
-  );
+  const tokens = cleanValue.split(" ");
+  const hasFraction = tokens.includes("half") || tokens.includes("quarter");
+  const hasScale = tokens.includes("hundred") || tokens.includes("thousand");
+  let total = 0;
+  let current = 0;
+  let matched = false;
 
-  if (!match) {
+  for (const token of tokens) {
+    if ((token === "a" || token === "an") && hasFraction && !hasScale) {
+      continue;
+    }
+
+    if (token === "half") {
+      current += 0.5;
+      matched = true;
+      continue;
+    }
+
+    if (token === "quarter") {
+      current += 0.25;
+      matched = true;
+      continue;
+    }
+
+    if (token === "hundred") {
+      current = Math.max(current, 1) * 100;
+      matched = true;
+      continue;
+    }
+
+    if (token === "thousand") {
+      total += Math.max(current, 1) * 1000;
+      current = 0;
+      matched = true;
+      continue;
+    }
+
+    const valueFromWord = reminderNumberWords[token];
+
+    if (valueFromWord === undefined) {
+      continue;
+    }
+
+    current += valueFromWord;
+    matched = true;
+  }
+
+  return matched ? total + current : null;
+}
+
+function normalizeReminderUnit(unit) {
+  const cleanUnit = cleanVoiceText(unit).toLowerCase();
+
+  if (/^d(?:ay|ays)?$/.test(cleanUnit)) {
+    return "days";
+  }
+
+  if (/^h(?:our|ours|r|rs)?$/.test(cleanUnit)) {
+    return "hours";
+  }
+
+  if (/^(m|mins?|minu?t?e?s?|minues|mintes|mns?)$/.test(cleanUnit)) {
+    return "minutes";
+  }
+
+  return "";
+}
+
+function singularizeReminderUnit(unit, amount) {
+  if (Number(amount) === 1) {
+    return unit.replace(/s$/, "");
+  }
+
+  return unit;
+}
+
+function formatReminderLead(amount, unit) {
+  if (!Number.isFinite(amount) || amount <= 0 || !unit) {
     return "";
   }
 
-  const unit = match[2]
-    .toLowerCase()
-    .replace(/^mins?$/, "minutes")
-    .replace(/^hrs?$/, "hours");
-  return `${match[1]} ${unit} before`;
+  const roundedAmount = Number.isInteger(amount)
+    ? amount
+    : Number.parseFloat(amount.toFixed(2));
+
+  return `${roundedAmount} ${singularizeReminderUnit(unit, roundedAmount)} before`;
+}
+
+function extractReminderLead(text) {
+  const cleanTextValue = cleanVoiceText(text);
+
+  if (/\b(?:a\s+)?quarter\s+(?:of\s+)?(?:an?\s+)?hour\b/i.test(cleanTextValue)) {
+    return "15 minutes before";
+  }
+
+  if (/\b(?:a\s+)?half\s+(?:of\s+)?(?:an?\s+)?hour\b/i.test(cleanTextValue)) {
+    return "30 minutes before";
+  }
+
+  const numericMatch = cleanTextValue.match(
+    /\b(\d+(?:\.\d+)?)\s*(m|mins?|minu?t?e?s?|minues|mintes|mns?|h|hrs?|hours?|d|days?)\b(?:\s*(?:before|early|earlier|ahead|prior|pre|notice|advance))?/i
+  );
+
+  if (numericMatch) {
+    const unit = normalizeReminderUnit(numericMatch[2]);
+    const amount = Number.parseFloat(numericMatch[1]);
+    return formatReminderLead(amount, unit);
+  }
+
+  const wordMatch = cleanTextValue.match(
+    /\b((?:(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fourty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|couple|few|half|quarter|and|of)[-\s]*)+)\s*(minutes?|mins?|minu?t?e?s?|minues|mintes|mns?|hours?|hrs?|days?)\b(?:\s*(?:before|early|earlier|ahead|prior|pre|notice|advance))?/i
+  );
+
+  if (wordMatch) {
+    const unit = normalizeReminderUnit(wordMatch[2]);
+    const amount = parseReminderAmount(wordMatch[1]);
+    return formatReminderLead(amount, unit);
+  }
+
+  return "";
 }
 
 function extractExplicitReminderTimePhrase(text) {
@@ -674,7 +803,7 @@ function getNextMeetingStep(conversation) {
   if (conversation.wantsReminder && !conversation.reminderLead) {
     return {
       asking: "reminderLead",
-      question: "How long before the meeting should I remind you?",
+      question: "How long before the meeting should I remind you? You can say any amount, like 8 minutes before, 1 hour before, or 90 minutes before.",
     };
   }
 
@@ -740,7 +869,7 @@ function updateMeetingConversation(conversation, reply) {
       if (!lead && !absoluteReminderTime) {
         return {
           conversation: nextConversation,
-          question: "How long before the meeting should I remind you? For example, 15 minutes before.",
+          question: "How long before the meeting should I remind you? You can say 8 minutes before, 1 hour before, 90 minutes before, or no reminder.",
         };
       }
 
