@@ -1519,7 +1519,9 @@ function resolveMeetingEndDate(data, startDate, command = "") {
 
   return addMinutes(
     startDate,
-    parseDurationMinutes(data?.duration, null) || parseDurationMinutes(command)
+    parseDurationMinutes(command, null) ||
+      parseDurationMinutes(data?.duration, null) ||
+      parseDurationMinutes("")
   );
 }
 
@@ -1528,6 +1530,12 @@ function meetingAlarmMinutesBefore(data, command, hasStartDate) {
 
   if (!hasStartDate || /\b(no|without|skip)\s+(reminder|alarm|alert)\b/i.test(text)) {
     return 0;
+  }
+
+  const commandMinutes = minutesBeforeValue(command);
+
+  if (commandMinutes !== null) {
+    return commandMinutes;
   }
 
   const explicit =
