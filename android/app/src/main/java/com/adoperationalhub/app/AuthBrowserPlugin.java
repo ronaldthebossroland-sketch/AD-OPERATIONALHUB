@@ -14,9 +14,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "AuthBrowser")
 public class AuthBrowserPlugin extends Plugin {
     private static final String[] BROWSER_PACKAGES = {
-        "com.sec.android.app.sbrowser",
         "com.android.chrome",
         "com.chrome.beta",
+        "com.sec.android.app.sbrowser",
         "com.microsoft.emmx",
         "org.mozilla.firefox",
         "com.brave.browser",
