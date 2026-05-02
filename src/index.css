@@ -1106,7 +1106,7 @@ body,
   }
 
   .luxury-main {
-    padding: calc(1rem + env(safe-area-inset-top)) 0.85rem
+    padding: max(2.25rem, calc(1rem + env(safe-area-inset-top))) 0.85rem
       calc(6.35rem + env(safe-area-inset-bottom)) !important;
   }
 
@@ -1231,7 +1231,9 @@ body,
 
 @media (min-width: 600px) and (max-width: 1100px) {
   .luxury-main {
+    padding-top: max(2.5rem, calc(1.25rem + env(safe-area-inset-top))) !important;
     padding-right: 1.25rem !important;
+    padding-bottom: calc(6.75rem + env(safe-area-inset-bottom)) !important;
     padding-left: 1.25rem !important;
   }
 

@@ -1085,7 +1085,7 @@ function parseFlexibleDateLike(value, { requireTime = false } = {}) {
   const hasExplicitTime = Boolean(parseTimeParts(text));
   const directDate = new Date(value);
   const hasExplicitNativeDate =
-    /\b\d{4}-\d{1,2}-\d{1,2}\b/.test(text) ||
+    /\b\d{4}-\d{1,2}-\d{1,2}(?=\D|$)/.test(text) ||
     /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/.test(text) ||
     /\b[a-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})\b/i.test(text) ||
     /\b\d{1,2}(?:st|nd|rd|th)?\s+[a-z]{3,9}(?:,?\s+\d{4})\b/i.test(text);
@@ -3763,6 +3763,24 @@ function formatDateForTask(date) {
   });
 }
 
+function parseIsoDatePrefix(value) {
+  const match = cleanText(value).match(/\b(\d{4})-(\d{1,2})-(\d{1,2})(?=\D|$)/);
+
+  if (!match) {
+    return null;
+  }
+
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  const day = Number.parseInt(match[3], 10);
+
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+}
+
 function extractDueText(command) {
   const match = cleanText(command).match(
     /\b(?:due(?:\s+date)?|deadline|by|on)\s*(?:should\s+be|is|for|at|to)?\s+(.+?)(?:\s+(?:priority|owner|status|severity|level)\b|[,.;]|$)/i
@@ -3834,8 +3852,14 @@ function resolveTaskDeadline(data, command) {
     cleanText(data?.due_date) ||
     cleanText(data?.dueDate) ||
     cleanText(data?.due_at) ||
-    cleanText(data?.dueAt) ||
-    cleanText(data?.when);
+      cleanText(data?.dueAt) ||
+      cleanText(data?.when);
+  const isoPrefixDate = parseIsoDatePrefix(rawDeadline);
+
+  if (isoPrefixDate) {
+    return formatDateForTask(isoPrefixDate);
+  }
+
   const parsedDate = parseDateLike(rawDeadline || extractDueText(command));
 
   if (parsedDate) {
