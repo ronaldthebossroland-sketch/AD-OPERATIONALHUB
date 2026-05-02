@@ -61,7 +61,13 @@ const GMAIL_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
 ];
-const GOOGLE_LOGIN_SCOPES = ["openid", "email", "profile"];
+const GOOGLE_LOGIN_SCOPES = [
+  "openid",
+  "email",
+  "profile",
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.send",
+];
 const transcriptionTickets = new Map();
 const gmailNativeStartTickets = new Map();
 const gmailNativeTransfers = new Map();
@@ -153,6 +159,7 @@ const sessionMiddleware = session({
   resave: false,
   saveUninitialized: false,
   cookie: {
+    maxAge: 1000 * 60 * 60 * 24 * 30,
     secure: SESSION_COOKIE_SECURE,
     httpOnly: true,
     sameSite: SESSION_COOKIE_SAME_SITE,
@@ -1786,7 +1793,8 @@ function startGoogleLoginOAuth(req, res) {
     const returnTo = getSafeAppReturnUrl(req.query.returnTo, "/");
 
     const url = oauth2Client.generateAuthUrl({
-      prompt: "select_account",
+      access_type: "offline",
+      prompt: "consent select_account",
       scope: GOOGLE_LOGIN_SCOPES,
       state: encodeOAuthState({
         flow: "login",

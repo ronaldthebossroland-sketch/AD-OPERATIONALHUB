@@ -20,6 +20,8 @@ const GOOGLE_LOGIN_SCOPES = [
   "openid",
   "email",
   "profile",
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.send",
 ].join(" ");
 const AuthBrowser = registerPlugin("AuthBrowser");
 
@@ -172,7 +174,8 @@ export async function signInWithGoogle() {
     provider: "google",
     options: {
       queryParams: {
-        prompt: "select_account",
+        access_type: "offline",
+        prompt: "consent select_account",
       },
       redirectTo,
       scopes: GOOGLE_LOGIN_SCOPES,
