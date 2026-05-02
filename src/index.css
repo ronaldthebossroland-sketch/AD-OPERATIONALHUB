@@ -37,9 +37,9 @@
     place-items: center;
     overflow: hidden;
     background:
-      linear-gradient(135deg, #f6f7ff 0 60%, #eeeaff 60% 90%, #fff3e2 90% 100%),
-      #f6f7ff;
-    color: #20212a;
+      linear-gradient(135deg, #f9fafb 0 60%, #e5e7eb 60% 90%, #eff6ff 90% 100%),
+      #f9fafb;
+    color: #111827;
     isolation: isolate;
   }
 
@@ -94,7 +94,7 @@
     height: clamp(104px, 18vw, 148px);
     width: clamp(104px, 18vw, 148px);
     border-radius: 32px;
-    filter: drop-shadow(0 18px 28px rgba(32, 33, 42, 0.14));
+    filter: drop-shadow(0 18px 28px rgba(17, 24, 39, 0.1));
   }
 
   .app-splash__orbit {
@@ -105,15 +105,15 @@
   }
 
   .app-splash__orbit--gold {
-    border: 1px solid rgba(32, 33, 42, 0.12);
-    border-top-color: rgba(124, 99, 255, 0.42);
+    border: 1px solid rgba(209, 213, 219, 0.9);
+    border-top-color: rgba(37, 99, 235, 0.48);
     transform: rotate(18deg);
   }
 
   .app-splash__orbit--cyan {
     inset: 34px;
-    border: 1px solid rgba(32, 33, 42, 0.1);
-    border-right-color: rgba(255, 159, 67, 0.45);
+    border: 1px solid rgba(209, 213, 219, 0.72);
+    border-right-color: rgba(37, 99, 235, 0.38);
     transform: rotate(-24deg);
   }
 
@@ -123,14 +123,14 @@
   }
 
   .app-splash__eyebrow {
-    color: #7c63ff;
+    color: #2563eb;
     font-size: 0.72rem;
     font-weight: 900;
     text-transform: uppercase;
   }
 
   .app-splash h1 {
-    color: #20212a;
+    color: #111827;
     font-size: clamp(1.72rem, 5vw, 3rem);
     font-weight: 950;
     line-height: 1.04;
@@ -141,7 +141,7 @@
   }
 
   .app-splash__copy p:last-child {
-    color: #6f7485;
+    color: #6b7280;
     font-size: clamp(0.95rem, 2.7vw, 1.08rem);
     font-weight: 700;
     line-height: 1.6;
@@ -154,9 +154,9 @@
   .app-splash__progress-track {
     height: 6px;
     overflow: hidden;
-    border: 1px solid rgba(32, 33, 42, 0.12);
+    border: 1px solid #d1d5db;
     border-radius: 999px;
-    background: rgba(124, 99, 255, 0.1);
+    background: #e5e7eb;
     box-shadow: none;
   }
 
@@ -164,9 +164,7 @@
     height: 100%;
     width: 58%;
     border-radius: inherit;
-    background:
-      linear-gradient(135deg, #20212a 0 78%, #7c63ff 78% 100%),
-      #20212a;
+    background: #2563eb;
     box-shadow: none;
   }
 
@@ -752,30 +750,32 @@ body {
   color: #756a82;
 }
 
-/* Reference palette pass: 60% airy lavender, 30% charcoal, 10% warm vivid accents. */
+/* Light Executive pass: 60% soft white, 30% light-gray surfaces, 10% royal blue accent. */
 :root,
 .luxury-app,
 .luxury-auth {
-  --ui-60: #f6f7ff;
-  --ui-60-alt: #eeeaff;
+  --ui-60: #f9fafb;
+  --ui-60-alt: #ffffff;
   --ui-60-soft: #ffffff;
-  --ui-30: #20212a;
-  --ui-30-soft: #2d3040;
-  --ui-muted: #6f7485;
-  --ui-line: rgba(32, 33, 42, 0.1);
-  --ui-10: #7c63ff;
-  --ui-10-warm: #ff9f43;
-  --ui-10-coral: #f05b78;
-  --ui-10-sky: #5ec8e5;
-  --ui-10-soft: #fff3e2;
-  --luxury-ink: var(--ui-30);
+  --ui-30: #e5e7eb;
+  --ui-30-soft: #f3f4f6;
+  --ui-ink: #111827;
+  --ui-ink-soft: #374151;
+  --ui-muted: #6b7280;
+  --ui-muted-soft: #9ca3af;
+  --ui-line: #d1d5db;
+  --ui-10: #2563eb;
+  --ui-10-hover: #1d4ed8;
+  --ui-10-soft: #eff6ff;
+  --ui-10-ring: #dbeafe;
+  --luxury-ink: var(--ui-ink);
   --luxury-muted: var(--ui-muted);
-  --luxury-gold: var(--ui-10-warm);
+  --luxury-gold: var(--ui-10);
   --luxury-champagne: var(--ui-10-soft);
-  --luxury-teal: var(--ui-10-sky);
-  --luxury-rose: var(--ui-10-coral);
+  --luxury-teal: var(--ui-10);
+  --luxury-rose: var(--ui-10);
   --luxury-border: var(--ui-line);
-  --luxury-shadow: 0 20px 52px rgba(32, 33, 42, 0.09);
+  --luxury-shadow: 0 18px 44px rgba(17, 24, 39, 0.08);
 }
 
 body,
@@ -787,7 +787,7 @@ body,
     linear-gradient(
       135deg,
       var(--ui-60) 0 60%,
-      var(--ui-60-alt) 60% 90%,
+      var(--ui-30) 60% 90%,
       var(--ui-10-soft) 90% 100%
     ),
     var(--ui-60) !important;
@@ -796,7 +796,7 @@ body,
 #root main,
 .luxury-main {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(246, 247, 255, 0.76)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(249, 250, 251, 0.92)),
     var(--ui-60) !important;
 }
 
@@ -804,9 +804,9 @@ body,
 .luxury-sidebar {
   position: relative;
   isolation: isolate;
-  border-color: rgba(255, 255, 255, 0.1) !important;
-  background: var(--ui-30) !important;
-  box-shadow: 18px 0 44px rgba(32, 33, 42, 0.17);
+  border-color: var(--ui-line) !important;
+  background: var(--ui-60-alt) !important;
+  box-shadow: 18px 0 44px rgba(17, 24, 39, 0.07);
 }
 
 #root aside::before,
@@ -819,43 +819,71 @@ body,
 #root aside h1,
 #root aside .font-black,
 #root aside .font-bold {
-  color: #ffffff;
+  color: var(--ui-ink);
 }
 
 #root aside p,
 #root aside button:not(.bg-slate-950) {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--ui-muted);
 }
 
 #root aside .bg-slate-100,
 #root aside .bg-white,
 .luxury-briefing-card,
 .luxury-user-card {
-  border-color: rgba(255, 255, 255, 0.12) !important;
-  background: rgba(255, 255, 255, 0.075) !important;
+  border-color: var(--ui-line) !important;
+  background: var(--ui-30-soft) !important;
   box-shadow: none;
 }
 
 #root aside button.bg-slate-950,
 .luxury-sidebar-nav-active {
-  border: 1px solid rgba(124, 99, 255, 0.38) !important;
-  background: rgba(124, 99, 255, 0.18) !important;
-  color: #ffffff !important;
+  border: 1px solid #bfdbfe !important;
+  background: var(--ui-10-soft) !important;
+  color: var(--ui-10-hover) !important;
   box-shadow: inset 3px 0 0 var(--ui-10) !important;
+}
+
+#root aside button.luxury-sidebar-nav-active,
+#root aside button.luxury-sidebar-nav-active * {
+  color: var(--ui-10-hover) !important;
+}
+
+#root aside button.luxury-button-primary {
+  border-color: var(--ui-10) !important;
+  background: var(--ui-10) !important;
+  color: #ffffff !important;
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.18) !important;
+}
+
+#root aside button.luxury-button-primary:hover {
+  background: var(--ui-10-hover) !important;
 }
 
 #root aside button:hover:not(.bg-slate-950),
 .luxury-sidebar-nav:hover {
-  background: rgba(255, 255, 255, 0.1) !important;
-  color: #ffffff !important;
+  background: var(--ui-30-soft) !important;
+  color: var(--ui-ink) !important;
+}
+
+.luxury-logo {
+  border-color: var(--ui-line) !important;
+  background: #ffffff !important;
+  box-shadow: 0 12px 24px rgba(17, 24, 39, 0.1) !important;
+}
+
+.luxury-sidebar .text-red-600 {
+  color: #dc2626 !important;
 }
 
 #root main .bg-white,
 .luxury-card,
 .luxury-panel,
 .luxury-login-card {
-  border-color: rgba(32, 33, 42, 0.08) !important;
-  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: var(--ui-line) !important;
+  background:
+    linear-gradient(180deg, #ffffff, #f9fafb),
+    var(--ui-60-alt) !important;
   box-shadow: var(--luxury-shadow) !important;
   backdrop-filter: blur(16px);
 }
@@ -863,8 +891,8 @@ body,
 #root main .bg-slate-50,
 #root main .bg-slate-100,
 .luxury-soft-icon {
-  border-color: rgba(124, 99, 255, 0.13) !important;
-  background: #f0edff !important;
+  border-color: #bfdbfe !important;
+  background: var(--ui-10-soft) !important;
   color: var(--ui-10) !important;
   box-shadow: none !important;
 }
@@ -881,7 +909,7 @@ body,
 #root header h1,
 .luxury-title {
   background: none !important;
-  color: var(--ui-30) !important;
+  color: var(--ui-ink) !important;
   -webkit-text-fill-color: currentColor !important;
 }
 
@@ -889,74 +917,70 @@ body,
 #root input,
 #root textarea,
 #root select {
-  border-color: rgba(32, 33, 42, 0.1) !important;
-  background: rgba(255, 255, 255, 0.9) !important;
-  color: var(--ui-30);
+  border-color: var(--ui-line) !important;
+  background: #ffffff !important;
+  color: var(--ui-ink);
   box-shadow: none !important;
 }
 
 #root input:focus,
 #root textarea:focus,
 #root select:focus {
-  border-color: rgba(124, 99, 255, 0.42) !important;
-  box-shadow: 0 0 0 3px rgba(124, 99, 255, 0.12) !important;
+  border-color: var(--ui-10) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14) !important;
 }
 
 #root header button.bg-slate-950,
 #root main button.bg-slate-950,
 .luxury-button-primary {
-  border-color: var(--ui-30) !important;
-  background:
-    linear-gradient(135deg, var(--ui-30) 0 78%, var(--ui-10) 78% 100%),
-    var(--ui-30) !important;
+  border-color: var(--ui-10) !important;
+  background: var(--ui-10) !important;
   color: #ffffff !important;
-  box-shadow: 0 14px 34px rgba(32, 33, 42, 0.18) !important;
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.2) !important;
 }
 
 #root header button.bg-slate-950:hover,
 #root main button.bg-slate-950:hover,
 .luxury-button-primary:hover:not(:disabled) {
-  background:
-    linear-gradient(135deg, var(--ui-30-soft) 0 78%, var(--ui-10-coral) 78% 100%),
-    var(--ui-30-soft) !important;
+  background: var(--ui-10-hover) !important;
 }
 
 #root button.border,
 .luxury-button-outline {
-  border-color: rgba(32, 33, 42, 0.1) !important;
-  background: rgba(255, 255, 255, 0.9) !important;
-  color: var(--ui-30) !important;
+  border-color: var(--ui-line) !important;
+  background: #ffffff !important;
+  color: var(--ui-ink) !important;
   box-shadow: none !important;
 }
 
 #root button.border:hover,
 .luxury-button-outline:hover:not(:disabled) {
-  border-color: rgba(124, 99, 255, 0.26) !important;
-  background: #f8f6ff !important;
+  border-color: #bfdbfe !important;
+  background: var(--ui-10-soft) !important;
 }
 
 .luxury-popover,
 .luxury-login-card {
-  border-color: rgba(124, 99, 255, 0.12) !important;
+  border-color: var(--ui-line) !important;
 }
 
 .luxury-role-pill,
 .luxury-mini-action {
-  border-color: rgba(124, 99, 255, 0.12) !important;
-  background: #f0edff !important;
+  border-color: #bfdbfe !important;
+  background: var(--ui-10-soft) !important;
 }
 
 .luxury-alert-badge {
-  background: var(--ui-10-coral) !important;
-  box-shadow: 0 10px 20px rgba(240, 91, 120, 0.22);
+  background: var(--ui-10) !important;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.22);
 }
 
 .luxury-mobile-nav {
-  border-color: rgba(124, 99, 255, 0.14) !important;
+  border-color: var(--ui-line) !important;
   background:
-    linear-gradient(90deg, #ffffff 0 60%, #f0edff 60% 90%, #fff3e2 90% 100%),
+    linear-gradient(90deg, #ffffff 0 60%, #e5e7eb 60% 90%, #eff6ff 90% 100%),
     #ffffff !important;
-  box-shadow: 0 -16px 40px rgba(32, 33, 42, 0.1) !important;
+  box-shadow: 0 -16px 40px rgba(17, 24, 39, 0.08) !important;
 }
 
 .luxury-mobile-nav button {
@@ -964,39 +988,35 @@ body,
 }
 
 .luxury-mobile-nav-active {
-  background:
-    linear-gradient(135deg, #f0edff 0 76%, #ffe4bd 76% 100%),
-    #f0edff !important;
-  color: var(--ui-30) !important;
-  box-shadow: 0 10px 24px rgba(124, 99, 255, 0.17) !important;
+  background: var(--ui-10-soft) !important;
+  color: var(--ui-10-hover) !important;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.14) !important;
 }
 
 .luxury-login-welcome {
-  border-color: rgba(124, 99, 255, 0.12) !important;
+  border-color: var(--ui-line) !important;
   background:
-    linear-gradient(135deg, #ffffff 0 62%, #f0edff 62% 90%, #fff3e2 90%),
+    linear-gradient(135deg, #ffffff 0 62%, #e5e7eb 62% 90%, #eff6ff 90%),
     #ffffff !important;
 }
 
 .luxury-segmented {
-  border-color: rgba(124, 99, 255, 0.12) !important;
-  background: #f0edff !important;
+  border-color: var(--ui-line) !important;
+  background: var(--ui-30) !important;
 }
 
 .luxury-auth .luxury-button-primary {
-  border-color: var(--ui-30) !important;
-  background:
-    linear-gradient(135deg, var(--ui-30) 0 76%, var(--ui-10-warm) 76% 100%),
-    var(--ui-30) !important;
-  box-shadow: 0 16px 34px rgba(32, 33, 42, 0.16) !important;
+  border-color: var(--ui-10) !important;
+  background: var(--ui-10) !important;
+  box-shadow: 0 16px 34px rgba(37, 99, 235, 0.2) !important;
 }
 
 #root .text-slate-950 {
-  color: var(--ui-30);
+  color: var(--ui-ink);
 }
 
 #root .text-slate-700 {
-  color: #3e4253;
+  color: var(--ui-ink-soft);
 }
 
 #root .text-slate-600,
@@ -1026,17 +1046,15 @@ body,
   align-items: center;
   justify-content: center;
   gap: 1rem;
-  border: 1px solid rgba(32, 33, 42, 0.08);
+  border: 1px solid #bfdbfe;
   border-radius: 999px;
-  background:
-    linear-gradient(135deg, var(--ui-30) 0 82%, var(--ui-10) 82% 100%),
-    var(--ui-30);
+  background: var(--ui-10);
   color: #ffffff;
   font-size: clamp(1.45rem, 4vw, 2.25rem);
   font-weight: 900;
   letter-spacing: 0;
   box-shadow:
-    0 34px 80px rgba(32, 33, 42, 0.2),
+    0 34px 80px rgba(37, 99, 235, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.14);
   transition:
     transform 180ms ease,
@@ -1047,22 +1065,20 @@ body,
 .voice-home__button:hover:not(:disabled) {
   transform: translateY(-3px);
   box-shadow:
-    0 40px 90px rgba(32, 33, 42, 0.24),
+    0 40px 90px rgba(37, 99, 235, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .voice-home__button:focus-visible {
-  outline: 4px solid rgba(124, 99, 255, 0.18);
+  outline: 4px solid rgba(37, 99, 235, 0.18);
   outline-offset: 8px;
 }
 
 .voice-home__button.is-listening {
-  background:
-    linear-gradient(135deg, #303447 0 78%, var(--ui-10-coral) 78% 100%),
-    #303447;
+  background: var(--ui-10-hover);
   box-shadow:
-    0 34px 80px rgba(32, 33, 42, 0.22),
-    0 0 0 12px rgba(124, 99, 255, 0.08);
+    0 34px 80px rgba(37, 99, 235, 0.25),
+    0 0 0 12px rgba(37, 99, 235, 0.1);
 }
 
 .voice-home__button:disabled {
