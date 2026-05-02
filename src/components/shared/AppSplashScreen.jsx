@@ -34,7 +34,7 @@ export default function AppSplashScreen({
             transition={{ duration: 6.5, ease: "linear", repeat: Infinity }}
           />
           <motion.img
-            src="/logo-mark.svg"
+            src="/logo-mark.png"
             alt=""
             aria-hidden="true"
             className="app-splash__logo"

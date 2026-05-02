@@ -131,7 +131,7 @@ export default function LoginPage({ onLogin }) {
       <div className="luxury-login-card w-full max-w-[28rem] rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
         <div className="flex items-center gap-3">
           <img
-            src="/logo-mark.svg"
+            src="/logo-mark.png"
             alt="Executive Virtual AI Assistant"
             className="luxury-logo h-14 w-14 shrink-0 rounded-2xl shadow-sm"
           />

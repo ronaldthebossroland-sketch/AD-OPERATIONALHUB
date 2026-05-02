@@ -43,7 +43,7 @@ export default function Sidebar({
       <aside className="luxury-sidebar hidden h-full w-72 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-5 lg:block">
         <div className="flex items-center gap-3">
           <img
-            src="/logo-mark.svg"
+            src="/logo-mark.png"
             alt="Executive Virtual AI Assistant"
             className="luxury-logo h-14 w-14 shrink-0 rounded-2xl shadow-sm"
           />
