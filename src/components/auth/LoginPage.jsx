@@ -1,7 +1,6 @@
 import {
   Loader2,
   Lock,
-  Mail,
   MessageCircle,
   ShieldCheck,
   UserPlus,
@@ -262,7 +261,9 @@ export default function LoginPage({ onLogin }) {
           {isGoogleLoading ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
-            <Mail className="mr-2 h-4 w-4" />
+            <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">
+              G
+            </span>
           )}
           {isGoogleLoading ? "Opening Google..." : "Continue with Google"}
         </Button>

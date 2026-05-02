@@ -61,6 +61,7 @@ const GMAIL_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
 ];
+const GOOGLE_LOGIN_SCOPES = ["openid", "email", "profile"];
 const transcriptionTickets = new Map();
 const PASSWORD_ITERATIONS = 310000;
 const PASSWORD_KEY_LENGTH = 32;
@@ -772,7 +773,7 @@ function getGoogleProviderTokens(body) {
   );
   const providerScope =
     cleanText(body.googleProviderScope || body.providerScope) ||
-    GMAIL_OAUTH_SCOPES.join(" ");
+    GOOGLE_LOGIN_SCOPES.join(" ");
   const expiryDate = getProviderTokenExpiry(
     body.googleProviderExpiresAt || body.providerExpiresAt,
     body.googleProviderExpiresIn || body.providerExpiresIn
@@ -790,7 +791,7 @@ function getGoogleProviderTokens(body) {
 async function attachGmailTokensFromProvider(req, expectedEmail) {
   const tokens = getGoogleProviderTokens(req.body);
 
-  if (!tokens) {
+  if (!tokens || !hasGmailReadScope(tokens)) {
     return false;
   }
 

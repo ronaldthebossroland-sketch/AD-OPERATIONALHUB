@@ -11,12 +11,10 @@ import {
   SUPABASE_WEB_REDIRECT_URL,
 } from "./supabaseClient";
 
-const GOOGLE_APP_SCOPES = [
+const GOOGLE_LOGIN_SCOPES = [
   "openid",
   "email",
   "profile",
-  "https://www.googleapis.com/auth/gmail.readonly",
-  "https://www.googleapis.com/auth/gmail.send",
 ].join(" ");
 
 function ensureSupabaseAuth() {
@@ -58,7 +56,7 @@ function readAuthParams(url) {
       searchParams.get("scope") ||
       hashParams.get("scope") ||
       (searchParams.get("provider_token") || hashParams.get("provider_token")
-        ? GOOGLE_APP_SCOPES
+        ? GOOGLE_LOGIN_SCOPES
         : ""),
     providerToken:
       searchParams.get("provider_token") || hashParams.get("provider_token"),
@@ -157,7 +155,7 @@ export async function signInWithGoogle() {
         prompt: "consent select_account",
       },
       redirectTo,
-      scopes: GOOGLE_APP_SCOPES,
+      scopes: GOOGLE_LOGIN_SCOPES,
       skipBrowserRedirect: isNative,
     },
   });
