@@ -203,6 +203,42 @@ function defaultAccessForRole(role) {
   return role === "Viewer" ? "Limited Access" : "Full Access";
 }
 
+function applyNonSuperAdminPrivileges(user) {
+  if (!user || user.role === "Super Admin") {
+    return user;
+  }
+
+  return {
+    ...user,
+    role: "Admin",
+    access: "Full Access",
+  };
+}
+
+async function ensureNonSuperAdminPrivileges(user, includePasswordHash = false) {
+  const privilegedUser = applyNonSuperAdminPrivileges(user);
+
+  if (
+    !privilegedUser ||
+    (privilegedUser.role === user.role &&
+      privilegedUser.access === user.access)
+  ) {
+    return { user: privilegedUser, error: null };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("app_users")
+    .update({
+      role: privilegedUser.role,
+      access: privilegedUser.access,
+    })
+    .eq("id", privilegedUser.id)
+    .select(includePasswordHash ? APP_USER_AUTH_COLUMNS : APP_USER_COLUMNS)
+    .single();
+
+  return { user: data || privilegedUser, error };
+}
+
 function hashPassword(password) {
   const salt = randomBytes(16).toString("hex");
   const hash = pbkdf2Sync(
@@ -267,7 +303,11 @@ async function getAppUserByEmail(email) {
     .ilike("email", finalEmail)
     .maybeSingle();
 
-  return { user: data || null, error };
+  if (error || !data) {
+    return { user: data || null, error };
+  }
+
+  return ensureNonSuperAdminPrivileges(data);
 }
 
 async function getAppUserForPasswordLogin(email) {
@@ -283,7 +323,11 @@ async function getAppUserForPasswordLogin(email) {
     .ilike("email", finalEmail)
     .maybeSingle();
 
-  return { user: data || null, error };
+  if (error || !data) {
+    return { user: data || null, error };
+  }
+
+  return ensureNonSuperAdminPrivileges(data, true);
 }
 
 async function getActiveAppUserByEmail(email) {
