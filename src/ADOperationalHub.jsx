@@ -29,6 +29,7 @@ import {
   getAlerts,
   getCurrentUser,
   getMeetings,
+  completeNativeGmailConnection,
   updateMeeting,
   getOperations,
   getPartners,
@@ -121,6 +122,7 @@ export default function ADOperationalHub() {
   const [activities, setActivities] = useState([]);
   const [operations, setOperations] = useState([]);
   const [transcriptionAutoStartKey, setTranscriptionAutoStartKey] = useState(0);
+  const [gmailRefreshKey, setGmailRefreshKey] = useState(0);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState("");
   const mainScrollRef = useRef(null);
@@ -197,9 +199,29 @@ export default function ADOperationalHub() {
         }
 
         const requestedView = returnUrl.searchParams.get("view");
+        const gmailTransfer = returnUrl.searchParams.get("gmailTransfer");
 
         if (viewAccess[requestedView]) {
           setActiveView(requestedView);
+        }
+
+        if (gmailTransfer) {
+          setActiveView("emails");
+          completeNativeGmailConnection(gmailTransfer)
+            .then((data) => {
+              if (!data.ok) {
+                console.warn(
+                  "Could not complete native Gmail connection:",
+                  data.error
+                );
+              }
+
+              setGmailRefreshKey(Date.now());
+            })
+            .catch((error) => {
+              console.warn("Could not complete native Gmail connection:", error);
+              setGmailRefreshKey(Date.now());
+            });
         }
 
         if (window.history?.replaceState) {
@@ -694,7 +716,11 @@ export default function ADOperationalHub() {
         return <PartnersView partners={partners} setPartners={setPartners} />;
       case "emails":
         return (
-          <EmailsView inboxItems={inboxItems} setInboxItems={setInboxItems} />
+          <EmailsView
+            inboxItems={inboxItems}
+            setInboxItems={setInboxItems}
+            refreshKey={gmailRefreshKey}
+          />
         );
       case "operations":
         return (

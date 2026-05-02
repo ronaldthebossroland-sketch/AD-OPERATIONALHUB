@@ -2,7 +2,12 @@ import { App } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
-import { API_BASE_URL, APP_HOME_URL, loginWithSupabaseToken } from "./api";
+import {
+  API_BASE_URL,
+  APP_HOME_URL,
+  createNativeGmailStart,
+  loginWithSupabaseToken,
+} from "./api";
 import {
   isSupabaseAuthConfigured,
   supabase,
@@ -167,9 +172,7 @@ export async function signInWithGoogle() {
     provider: "google",
     options: {
       queryParams: {
-        access_type: "offline",
-        include_granted_scopes: "true",
-        prompt: "consent select_account",
+        prompt: "select_account",
       },
       redirectTo,
       scopes: GOOGLE_LOGIN_SCOPES,
@@ -312,14 +315,20 @@ export async function signOutSupabaseAuth() {
 
 export async function connectGmailWithGoogle() {
   const returnTo = `${APP_HOME_URL}/?view=emails&gmail=connected`;
-  const url = `${API_BASE_URL}/auth/gmail?returnTo=${encodeURIComponent(
-    returnTo
-  )}`;
+  const params = new URLSearchParams({ returnTo });
 
   if (Capacitor.isNativePlatform()) {
-    await openNativeAuthUrl(url);
+    const data = await createNativeGmailStart(returnTo);
+
+    if (!data.ok || !data.authPath) {
+      throw new Error(data.error || "Could not start Gmail connection.");
+    }
+
+    await openNativeAuthUrl(`${API_BASE_URL}${data.authPath}`);
     return;
   }
+
+  const url = `${API_BASE_URL}/auth/gmail?${params.toString()}`;
 
   window.location.assign(url);
 }

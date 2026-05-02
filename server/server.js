@@ -63,6 +63,9 @@ const GMAIL_OAUTH_SCOPES = [
 ];
 const GOOGLE_LOGIN_SCOPES = ["openid", "email", "profile"];
 const transcriptionTickets = new Map();
+const gmailNativeStartTickets = new Map();
+const gmailNativeTransfers = new Map();
+const GMAIL_NATIVE_TRANSFER_TTL_MS = 5 * 60 * 1000;
 const PASSWORD_ITERATIONS = 310000;
 const PASSWORD_KEY_LENGTH = 32;
 
@@ -711,6 +714,11 @@ function decodeOAuthState(value) {
 function isAllowedAppReturnUrl(url) {
   try {
     const parsedUrl = new URL(url);
+
+    if (parsedUrl.protocol === "capacitor:" && parsedUrl.host === "localhost") {
+      return true;
+    }
+
     const normalizedOrigin = parsedUrl.origin.replace(/\/+$/, "");
 
     return (
@@ -747,6 +755,76 @@ function setUrlParam(url, key, value) {
   parsedUrl.searchParams.set(key, value);
 
   return parsedUrl.toString();
+}
+
+function cleanupExpiredGmailNativeStartTickets() {
+  const now = Date.now();
+
+  for (const [ticketId, ticket] of gmailNativeStartTickets.entries()) {
+    if (!ticket?.expiresAt || ticket.expiresAt <= now) {
+      gmailNativeStartTickets.delete(ticketId);
+    }
+  }
+}
+
+function createGmailNativeStartTicket(email) {
+  cleanupExpiredGmailNativeStartTickets();
+
+  const ticketId = randomUUID();
+  gmailNativeStartTickets.set(ticketId, {
+    email: normalizeEmail(email),
+    expiresAt: Date.now() + GMAIL_NATIVE_TRANSFER_TTL_MS,
+  });
+
+  return ticketId;
+}
+
+function consumeGmailNativeStartTicket(ticketId) {
+  cleanupExpiredGmailNativeStartTickets();
+
+  const finalTicketId = cleanText(ticketId);
+  const ticket = gmailNativeStartTickets.get(finalTicketId);
+
+  if (ticket) {
+    gmailNativeStartTickets.delete(finalTicketId);
+  }
+
+  return ticket || null;
+}
+
+function cleanupExpiredGmailNativeTransfers() {
+  const now = Date.now();
+
+  for (const [transferId, transfer] of gmailNativeTransfers.entries()) {
+    if (!transfer?.expiresAt || transfer.expiresAt <= now) {
+      gmailNativeTransfers.delete(transferId);
+    }
+  }
+}
+
+function createGmailNativeTransfer(payload) {
+  cleanupExpiredGmailNativeTransfers();
+
+  const transferId = randomUUID();
+  gmailNativeTransfers.set(transferId, {
+    ...payload,
+    expiresAt: Date.now() + GMAIL_NATIVE_TRANSFER_TTL_MS,
+  });
+
+  return transferId;
+}
+
+function consumeGmailNativeTransfer(transferId) {
+  cleanupExpiredGmailNativeTransfers();
+
+  const finalTransferId = cleanText(transferId);
+  const transfer = gmailNativeTransfers.get(finalTransferId);
+
+  if (transfer) {
+    gmailNativeTransfers.delete(finalTransferId);
+  }
+
+  return transfer || null;
 }
 
 function getProviderTokenExpiry(expiresAt, expiresIn) {
@@ -822,6 +900,52 @@ async function attachGmailTokensFromProvider(req, expectedEmail) {
   };
 
   return true;
+}
+
+async function getUserFromSupabaseAccessToken(accessToken) {
+  const finalAccessToken = cleanText(accessToken);
+
+  if (!finalAccessToken) {
+    throw new Error("Supabase access token is required.");
+  }
+
+  const { data, error } = await supabaseAdmin.auth.getUser(finalAccessToken);
+
+  if (error) {
+    throw error;
+  }
+
+  const supabaseUser = data.user;
+  const email = normalizeEmail(supabaseUser?.email);
+
+  if (!email) {
+    throw new Error("Google profile email is required.");
+  }
+
+  const provider =
+    supabaseUser.app_metadata?.provider ||
+    supabaseUser.app_metadata?.providers?.[0];
+
+  if (provider && provider !== "google") {
+    const providerError = new Error("Use Google to sign in.");
+    providerError.status = 403;
+    throw providerError;
+  }
+
+  const name =
+    cleanText(supabaseUser.user_metadata?.full_name) ||
+    cleanText(supabaseUser.user_metadata?.name) ||
+    email;
+  const { user, error: userError, inactive } = await getOrCreateGoogleUser(
+    email,
+    name
+  );
+
+  if (userError) {
+    throw userError;
+  }
+
+  return { email, inactive, user };
 }
 
 const WEEKDAY_INDEX = {
@@ -1607,14 +1731,31 @@ function calendarSourceEvent({
    GMAIL CONNECT
 ========================= */
 
-function startGmailOAuth(req, res) {
+async function startGmailOAuth(req, res) {
   try {
+    const isNative = req.query.native === "1";
+    const requestedReturnTo =
+      cleanText(req.query.returnTo) ||
+      (isNative ? "capacitor://localhost/?view=emails&gmail=connected" : "");
     const returnTo = getSafeAppReturnUrl(
-      req.query.returnTo,
+      requestedReturnTo,
       "/?view=emails&gmail=connected"
     );
+    let sessionEmail = normalizeEmail(req.session.user?.email);
 
-    if (!req.session.user?.email) {
+    if (!sessionEmail && isNative && req.query.nativeTicket) {
+      const ticket = consumeGmailNativeStartTicket(req.query.nativeTicket);
+
+      if (!ticket?.email) {
+        return res.redirect(
+          setUrlParam(returnTo, "gmail", "login-required")
+        );
+      }
+
+      sessionEmail = ticket.email;
+    }
+
+    if (!sessionEmail) {
       return res.redirect(setUrlParam(returnTo, "gmail", "login-required"));
     }
 
@@ -1626,7 +1767,9 @@ function startGmailOAuth(req, res) {
       scope: GMAIL_OAUTH_SCOPES,
       state: encodeOAuthState({
         flow: "gmail",
+        native: isNative,
         returnTo,
+        userEmail: sessionEmail,
       }),
     });
 
@@ -1643,9 +1786,7 @@ function startGoogleLoginOAuth(req, res) {
     const returnTo = getSafeAppReturnUrl(req.query.returnTo, "/");
 
     const url = oauth2Client.generateAuthUrl({
-      access_type: "offline",
-      include_granted_scopes: true,
-      prompt: "consent select_account",
+      prompt: "select_account",
       scope: GOOGLE_LOGIN_SCOPES,
       state: encodeOAuthState({
         flow: "login",
@@ -1709,16 +1850,44 @@ app.get("/auth/google/callback", async (req, res) => {
       );
     }
 
-    req.session.tokens = tokens;
+    const profileEmail = normalizeEmail(profile.email);
 
-    if (state.flow === "gmail" && req.session.user?.email) {
-      req.session.gmail = {
-        connectedEmail: profile.email,
+    if (state.flow === "gmail") {
+      const expectedEmail = normalizeEmail(
+        state.userEmail || req.session.user?.email
+      );
+
+      if (expectedEmail && profileEmail !== expectedEmail) {
+        return res.redirect(setUrlParam(returnTo, "gmail", "email-mismatch"));
+      }
+
+      const gmail = {
+        connectedEmail: profileEmail,
         connectedAt: new Date().toISOString(),
         readEnabled: hasGmailReadScope(tokens),
         sendEnabled: hasGmailSendScope(tokens),
       };
+
+      if (state.native === true) {
+        const transferId = createGmailNativeTransfer({
+          email: profileEmail,
+          gmail,
+          tokens,
+        });
+
+        return res.redirect(
+          setUrlParam(
+            setUrlParam(returnTo, "gmail", "connected"),
+            "gmailTransfer",
+            transferId
+          )
+        );
+      }
+
+      req.session.tokens = tokens;
+      req.session.gmail = gmail;
     } else {
+      req.session.tokens = tokens;
       setSessionUser(req, user);
     }
 
@@ -1773,40 +1942,8 @@ app.post("/api/auth/supabase", async (req, res) => {
       return res.status(400).json({ error: "Supabase access token is required." });
     }
 
-    const { data, error } = await supabaseAdmin.auth.getUser(accessToken);
-
-    if (error) {
-      throw error;
-    }
-
-    const supabaseUser = data.user;
-    const email = normalizeEmail(supabaseUser?.email);
-
-    if (!email) {
-      return res.status(401).json({ error: "Google profile email is required." });
-    }
-
-    const provider =
-      supabaseUser.app_metadata?.provider ||
-      supabaseUser.app_metadata?.providers?.[0];
-
-    if (provider && provider !== "google") {
-      return res.status(403).json({ error: "Use Google to sign in." });
-    }
-
-    const name =
-      cleanText(supabaseUser.user_metadata?.full_name) ||
-      cleanText(supabaseUser.user_metadata?.name) ||
-      email;
-
-    const { user, error: userError, inactive } = await getOrCreateGoogleUser(
-      email,
-      name
-    );
-
-    if (userError) {
-      throw userError;
-    }
+    const { email, inactive, user } =
+      await getUserFromSupabaseAccessToken(accessToken);
 
     if (!user) {
       return res.status(403).json({
@@ -5703,6 +5840,47 @@ app.post("/api/email-drafts", requireRole(...ADMIN_ROLES), async (req, res) => {
 /* =========================
    GMAIL
 ========================= */
+
+app.post("/api/gmail/native-start", requireRole(...ADMIN_ROLES), (req, res) => {
+  const returnTo = getSafeAppReturnUrl(
+    req.body.returnTo,
+    "/?view=emails&gmail=connected"
+  );
+  const ticketId = createGmailNativeStartTicket(req.session.user.email);
+  const params = new URLSearchParams({
+    native: "1",
+    nativeTicket: ticketId,
+    returnTo,
+  });
+
+  res.json({
+    authPath: `/auth/gmail?${params.toString()}`,
+  });
+});
+
+app.post("/api/gmail/native-transfer", requireRole(...ADMIN_ROLES), (req, res) => {
+  const transfer = consumeGmailNativeTransfer(req.body.transferId);
+
+  if (!transfer) {
+    return res.status(404).json({
+      error: "Gmail connection expired. Please connect Gmail again.",
+    });
+  }
+
+  if (normalizeEmail(req.session.user?.email) !== normalizeEmail(transfer.email)) {
+    return res.status(403).json({
+      error: "Gmail account must match the signed-in app account.",
+    });
+  }
+
+  req.session.tokens = transfer.tokens;
+  req.session.gmail = transfer.gmail;
+
+  res.json({
+    connected: Boolean(hasGmailReadScope(req.session.tokens)),
+    gmail: req.session.gmail,
+  });
+});
 
 app.get("/api/gmail/status", requireRole(...ADMIN_ROLES), (req, res) => {
   const readEnabled = Boolean(

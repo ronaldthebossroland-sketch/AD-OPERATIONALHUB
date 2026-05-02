@@ -28,7 +28,7 @@ function replySubject(subject) {
     : `Re: ${cleanSubject}`;
 }
 
-export default function EmailsView({ inboxItems, setInboxItems }) {
+export default function EmailsView({ inboxItems, setInboxItems, refreshKey = 0 }) {
   const [gmailConnected, setGmailConnected] = useState(false);
   const [gmailError, setGmailError] = useState("");
   const [loadingEmails, setLoadingEmails] = useState(false);
@@ -227,7 +227,7 @@ Return only the email body. Do not send it.
 
     checkGmailStatus();
     Promise.resolve().then(() => loadSavedDrafts());
-  }, [fetchGmailEmails, loadSavedDrafts, setInboxItems]);
+  }, [fetchGmailEmails, loadSavedDrafts, refreshKey, setInboxItems]);
 
   const statusText = loadingEmails
     ? "Loading real Gmail messages..."

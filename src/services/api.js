@@ -188,6 +188,20 @@ export function sendGmailMessage(message) {
   });
 }
 
+export function createNativeGmailStart(returnTo) {
+  return requestJson("/api/gmail/native-start", {
+    method: "POST",
+    body: JSON.stringify({ returnTo }),
+  });
+}
+
+export function completeNativeGmailConnection(transferId) {
+  return requestJson("/api/gmail/native-transfer", {
+    method: "POST",
+    body: JSON.stringify({ transferId }),
+  });
+}
+
 export function getCurrentUser() {
   return requestJson("/api/auth/me");
 }
