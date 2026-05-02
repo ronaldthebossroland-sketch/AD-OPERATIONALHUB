@@ -932,6 +932,37 @@ function parseDateAnchor(text, baseDate = new Date()) {
     return date;
   }
 
+  const monthReferenceMatch = lower.match(
+    /\b(?:on\s+|by\s+|due\s+|deadline\s+|the\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?(?!\s*:)\s+(?:of\s+)?((?:this|next)\s+month)\b/i
+  );
+  const ordinalDayMatch = lower.match(
+    /\b(?:on\s+|by\s+|due\s+|deadline\s+|the\s+)(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)(?!\s*:)\b/i
+  );
+  const dayOfMonthMatch = monthReferenceMatch || ordinalDayMatch;
+
+  if (dayOfMonthMatch) {
+    const day = Number.parseInt(dayOfMonthMatch[1], 10);
+
+    if (Number.isFinite(day) && day >= 1 && day <= 31) {
+      const date = new Date(base);
+      const monthModifier = dayOfMonthMatch[2] || "";
+
+      date.setDate(1);
+
+      if (/next/i.test(monthModifier)) {
+        date.setMonth(date.getMonth() + 1);
+      }
+
+      date.setDate(day);
+
+      if (!monthModifier && date.getTime() < base.getTime()) {
+        date.setMonth(date.getMonth() + 1);
+      }
+
+      return date;
+    }
+  }
+
   const weekdayMatch = lower.match(
     /\b(next\s+)?(sun(?:day)?|mon(?:day)?|tue(?:s|sday|day)?|wed(?:nesday)?|thu(?:r|rs|rsday|rday|day)?|fri(?:day)?|sat(?:urday)?)\b/i
   );
@@ -3447,6 +3478,71 @@ function inferSeverity(command, fallback = "Medium") {
   return fallback;
 }
 
+function formatDateForTask(date) {
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function extractDueText(command) {
+  const match = cleanText(command).match(
+    /\b(?:due(?:\s+date)?|deadline|by|on)\s*(?:should\s+be|is|for|at|to)?\s+(.+?)(?:\s+(?:priority|owner|status|severity|level)\b|[,.;]|$)/i
+  );
+
+  return cleanText(match?.[1]);
+}
+
+function inferTaskDeadline(command) {
+  const dueText = extractDueText(command);
+  const parsedDate = parseDateLike(dueText || command);
+
+  if (parsedDate) {
+    return formatDateForTask(parsedDate);
+  }
+
+  return dueText;
+}
+
+function inferTaskTitle(command) {
+  const cleanCommand = cleanText(command);
+  const titledMatch = cleanCommand.match(
+    /\btask\s+(?:called|titled)\s+"?(.+?)"?(?:\s+(?:with\s+deadline|due|deadline|by|priority|owner)\b|[,.;]|$)/i
+  );
+  const todoMatch = cleanCommand.match(
+    /\b(?:task|todo|to do|action item)\s+(?:to|for)?\s*(.+?)(?:\s+(?:with\s+deadline|due|deadline|by|priority|owner)\b|[,.;]|$)/i
+  );
+  const title = cleanText(titledMatch?.[1] || todoMatch?.[1] || "")
+    .replace(/\b(?:for\s+)?me\b/gi, "")
+    .replace(/\b(?:and\s+)?(?:the\s+)?$/i, "")
+    .trim();
+
+  if (!title || /^(a|new|task|todo|to do|it|and|the)$/i.test(title)) {
+    return "";
+  }
+
+  return title;
+}
+
+function resolveTaskDeadline(data, command) {
+  const rawDeadline =
+    cleanText(data?.deadline) ||
+    cleanText(data?.due) ||
+    cleanText(data?.due_date) ||
+    cleanText(data?.dueDate) ||
+    cleanText(data?.due_at) ||
+    cleanText(data?.dueAt) ||
+    cleanText(data?.when);
+  const parsedDate = parseDateLike(rawDeadline || extractDueText(command));
+
+  if (parsedDate) {
+    return formatDateForTask(parsedDate);
+  }
+
+  return rawDeadline || inferTaskDeadline(command);
+}
+
 function inferOperationArea(command) {
   const match = cleanText(command).match(
     /\b(?:area|category|department|operations?)\s+(?:should\s+be|is|as)\s+([a-z][a-z\s-]+?)(?:[,.;]|$)/i
@@ -3621,13 +3717,18 @@ function buildClauseActions(clause) {
   }
 
   if (/\b(task|todo|to do|action item)\b/i.test(clause)) {
+    const priority = inferSeverity(clause);
+    const title = inferTaskTitle(clause) || inferRecordTitle(clause, "Task");
+
     actions.push({
       type: "task",
-      title: inferRecordTitle(clause, "Task"),
+      title,
       data: {
-        title: inferRecordTitle(clause, "Task"),
+        title,
         detail: clause,
-        severity: inferSeverity(clause),
+        deadline: inferTaskDeadline(clause),
+        priority,
+        severity: priority,
       },
     });
   }
@@ -3772,7 +3873,19 @@ function mergeSupplementedAction(existing, supplemental) {
     }
   }
 
-  for (const field of ["briefing", "notes", "detail", "severity", "area", "source_query", "prompt"]) {
+  for (const field of [
+    "briefing",
+    "notes",
+    "detail",
+    "severity",
+    "priority",
+    "deadline",
+    "due",
+    "owner",
+    "area",
+    "source_query",
+    "prompt",
+  ]) {
     if (!cleanText(existingData[field]) && cleanText(supplementalData[field])) {
       mergedData[field] = supplementalData[field];
     }
@@ -3932,12 +4045,14 @@ Data guidance:
 - email_draft data: title, recipient, subject, body, source_query, prompt.
 - report/briefing/general_ai data: prompt.
 - transcript_summary data: prompt.
-- task data: title, detail, severity, area, status.
+- task data: title, detail, deadline, priority, owner, status.
 - partner data: name, email, phone, milestone, next_step.
 
 Rules:
 - Preserve every separate task in the user command.
 - Split comma-separated or "and" joined tasks into separate actions.
+- When the user gives a task due date, deadline, owner, or priority, include those fields in task data.
+- Use the current date/time to resolve task dates like "today", "tomorrow", weekdays, and "the 7th of this month".
 - A time attached to a meeting is the meeting time, not a separate reminder.
 - When the user schedules a meeting with a date/time, include start_at as an ISO timestamp when possible.
 - Use the current date/time from the context to resolve today, tomorrow, and weekdays.
@@ -4706,8 +4821,10 @@ async function executeCommandAction(action, req, context, createdRecords, comman
         title,
         detail: compactCommandDetail(action.data?.detail || command, title, title),
         owner: cleanText(action.data?.owner),
-        deadline: cleanText(action.data?.deadline) || cleanText(action.data?.due),
-        priority: normalizeActionSeverity(action.data?.priority || action.data?.severity),
+        deadline: resolveTaskDeadline(action.data, command),
+        priority: normalizeActionSeverity(
+          action.data?.priority || action.data?.severity || inferSeverity(command)
+        ),
         status: cleanText(action.data?.status, "Open") || "Open",
         source_type: cleanText(action.data?.source_type),
         source_id: action.data?.source_id || null,

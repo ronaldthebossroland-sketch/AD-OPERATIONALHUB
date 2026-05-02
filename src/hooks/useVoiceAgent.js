@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createTranscriptionSession,
   runAICommand,
+  runScheduleAssistant,
   synthesizeVoiceAudio,
   TRANSCRIPTION_WS_URL,
 } from "../services/api";
@@ -63,6 +64,7 @@ export function actionTypeLabel(type) {
     briefing: "Briefing",
     task: "Task",
     partner: "Partner",
+    calendar_event: "Calendar Event",
     general_ai: "AI",
     transcription: "Transcription",
   };
@@ -128,8 +130,16 @@ function hasMeetingSchedulingIntent(command) {
   );
 }
 
+function hasCalendarSchedulingIntent(command) {
+  return (
+    /\b(add|create|schedule|book|put|place|set up)\b.*\b(calendar|event|appointment)\b/i.test(
+      command
+    ) || /\bput\b.*\bon\s+my\s+calendar\b/i.test(command)
+  );
+}
+
 function hasDateOrTime(text) {
-  return /\b(today|tomorrow|tonight|morning|afternoon|evening|noon|midnight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+\w+|this\s+\w+|in\s+(?:a|an|one|\d+)\s+(?:minute|minutes|hour|hours|day|days)|at\s+\d{1,2}|by\s+\d{1,2}|for\s+\d{1,2}|\d{1,2}:\d{2}|\d{1,2}\s*(am|pm))\b/i.test(
+  return /\b(today|tomorrow|tonight|morning|afternoon|evening|noon|midnight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\s+\w+|this\s+\w+|this\s+month|next\s+month|\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:this|next)\s+month|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}|\d{1,2}\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)|in\s+(?:a|an|one|\d+)\s+(?:minute|minutes|hour|hours|day|days)|at\s+\d{1,2}|by\s+\d{1,2}|for\s+\d{1,2}|\d{1,2}:\d{2}|\d{1,2}\s*(am|pm))\b/i.test(
     text
   );
 }
@@ -151,6 +161,8 @@ const spokenHourValues = {
 
 const weekdayPattern =
   "sun(?:day)?|mon(?:day)?|tue(?:s|sday|day)?|wed(?:nesday)?|thu(?:r|rs|rsday|rday|day)?|fri(?:day)?|sat(?:urday)?";
+const monthNamePattern =
+  "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
 
 function extractRelativeTimePhrase(text) {
   const match = cleanVoiceText(text).match(
@@ -158,6 +170,40 @@ function extractRelativeTimePhrase(text) {
   );
 
   return match ? match[1].replace(/\s+/g, " ").toLowerCase() : "";
+}
+
+function formatLocalDatePhrase(date) {
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function resolveDayOfMonthPhrase(dayText, monthModifier = "") {
+  const day = Number.parseInt(dayText, 10);
+
+  if (!Number.isFinite(day) || day < 1 || day > 31) {
+    return "";
+  }
+
+  const now = new Date();
+  const date = new Date(now);
+
+  date.setHours(0, 0, 0, 0);
+  date.setDate(1);
+
+  if (/next/i.test(monthModifier)) {
+    date.setMonth(date.getMonth() + 1);
+  }
+
+  date.setDate(day);
+
+  if (!monthModifier && date.getTime() < now.setHours(0, 0, 0, 0)) {
+    date.setMonth(date.getMonth() + 1);
+  }
+
+  return formatLocalDatePhrase(date);
 }
 
 function extractDayPhrase(text) {
@@ -175,6 +221,22 @@ function extractDayPhrase(text) {
     return relativeDayMatch[1].toLowerCase();
   }
 
+  const monthReferenceMatch = value.match(
+    /\b(?:on\s+|by\s+|due\s+|deadline\s+|the\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?(?!\s*:)\s+(?:of\s+)?((?:this|next)\s+month)\b/i
+  );
+
+  if (monthReferenceMatch) {
+    return resolveDayOfMonthPhrase(monthReferenceMatch[1], monthReferenceMatch[2]);
+  }
+
+  const ordinalDayMatch = value.match(
+    /\b(?:on\s+|by\s+|due\s+|deadline\s+|the\s+)(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)(?!\s*:)\b/i
+  );
+
+  if (ordinalDayMatch) {
+    return resolveDayOfMonthPhrase(ordinalDayMatch[1]);
+  }
+
   const weekdayMatch = value.match(
     new RegExp(`\\b((?:next|this)\\s+(?:${weekdayPattern})|(?:${weekdayPattern}))\\b`, "i")
   );
@@ -183,13 +245,11 @@ function extractDayPhrase(text) {
     return weekdayMatch[1].toLowerCase();
   }
 
-  const monthName =
-    "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
   const monthFirstMatch = value.match(
-    new RegExp(`\\b((?:${monthName})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?)\\b`, "i")
+    new RegExp(`\\b((?:${monthNamePattern})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?)\\b`, "i")
   );
   const dayFirstMatch = value.match(
-    new RegExp(`\\b(\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${monthName})(?:,?\\s+\\d{4})?)\\b`, "i")
+    new RegExp(`\\b(\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${monthNamePattern})(?:,?\\s+\\d{4})?)\\b`, "i")
   );
   const numericDateMatch = value.match(/\b(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\b/);
 
@@ -415,6 +475,19 @@ function cleanMeetingTimeReply(text) {
 
 function extractMeetingTimePhrase(text) {
   const cleanTextValue = cleanVoiceText(text);
+  const day = extractDayPhrase(cleanTextValue);
+
+  if (day) {
+    const dayClock = extractClockPhrase(cleanTextValue);
+    const meridiem = extractMeridiem(cleanTextValue);
+
+    if (dayClock) {
+      return `${day} at ${formatClockForQuestion(dayClock)}${meridiem ? ` ${meridiem}` : ""}`;
+    }
+
+    return day;
+  }
+
   const dateWords =
     "today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next\\s+\\w+|this\\s+\\w+";
   const clock = "\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?";
@@ -843,22 +916,42 @@ function hasTaskIntent(command) {
   return /\b(create|add|make|set up)\b.*\b(task|todo|to do|action item)\b/i.test(command);
 }
 
+function extractDatePhraseForRecord(text) {
+  const timePhrase = extractMeetingTimePhrase(text);
+  const dayPhrase = extractDayPhrase(text);
+
+  return timePhrase || dayPhrase || "";
+}
+
+function extractDuePhrase(text) {
+  const cleanTextValue = cleanVoiceText(text);
+  const match = cleanTextValue.match(
+    /\b(?:due(?:\s+date)?|deadline|by|on)\s*(?:should\s+be|is|for|at|to)?\s+(.+?)(?:\s+(?:priority|owner|status|severity|level)\b|[,.;]|$)/i
+  );
+  const candidate = cleanVoiceText(match?.[1] || cleanTextValue);
+
+  return extractDatePhraseForRecord(candidate);
+}
+
 function extractTaskTitle(command) {
-  const match = cleanVoiceText(command).match(
-    /\b(?:task|todo|to do|action item)\s+(?:to|for|called|titled)?\s*(.+?)(?:\s+(?:by|due|deadline|priority|owner)\b|[,.;]|$)/i
+  const cleanCommand = cleanVoiceText(command);
+  const match = cleanCommand.match(
+    /\b(?:task|todo|to do|action item)\s+(?:to|for|called|titled)?\s*(.+?)(?:\s+(?:with\s+deadline|by|due(?:\s+date)?|deadline|priority|owner)\b|[,.;]|$)/i
   );
   const title = cleanVoiceText(match?.[1])
+    .replace(/\b(?:for\s+)?me\b/gi, "")
+    .replace(/\b(?:and\s+)?(?:the\s+)?$/i, "")
     .replace(/^(to|for)\s+/i, "")
     .trim();
 
-  return /^(a|new|task|todo|to do|it)$/i.test(title) ? "" : title;
+  return /^(a|new|task|todo|to do|it|and|the)$/i.test(title) ? "" : title;
 }
 
 function createTaskConversation(command) {
   return {
     type: "task",
     title: extractTaskTitle(command),
-    deadline: hasDateOrTime(command) ? extractMeetingTimePhrase(command) : null,
+    deadline: extractDuePhrase(command) || null,
     priority: extractPriority(command),
     asking: "",
   };
@@ -891,9 +984,7 @@ function updateTaskConversation(conversation, reply) {
   if (conversation.asking === "deadline") {
     nextConversation.deadline = noOptionalValue(cleanReply)
       ? ""
-      : hasDateOrTime(cleanReply)
-        ? extractMeetingTimePhrase(cleanReply)
-        : cleanReply;
+      : extractDuePhrase(cleanReply) || cleanReply;
   }
 
   if (conversation.asking === "priority") {
@@ -911,9 +1002,9 @@ function updateTaskConversation(conversation, reply) {
 
 function buildTaskConversationCommand(conversation) {
   return [
-    `Create a task titled "${conversation.title}".`,
-    conversation.deadline ? `Deadline: ${conversation.deadline}.` : "No deadline.",
-    `Priority: ${conversation.priority || "Medium"}.`,
+    `Create a task titled "${conversation.title}"`,
+    conversation.deadline ? `with deadline ${conversation.deadline}` : "with no deadline",
+    `and priority ${conversation.priority || "Medium"}.`,
   ].join(" ");
 }
 
@@ -934,7 +1025,7 @@ function createOperationConversation(command) {
     type: "operation",
     title: extractOperationTitle(command),
     severity: extractPriority(command),
-    due: hasDateOrTime(command) ? extractMeetingTimePhrase(command) : null,
+    due: extractDuePhrase(command) || null,
     asking: "",
   };
 }
@@ -970,9 +1061,7 @@ function updateOperationConversation(conversation, reply) {
   if (conversation.asking === "due") {
     nextConversation.due = noOptionalValue(cleanReply)
       ? ""
-      : hasDateOrTime(cleanReply)
-        ? extractMeetingTimePhrase(cleanReply)
-        : cleanReply;
+      : extractDuePhrase(cleanReply) || cleanReply;
   }
 
   const nextStep = getNextOperationStep(nextConversation);
@@ -986,9 +1075,9 @@ function updateOperationConversation(conversation, reply) {
 
 function buildOperationConversationCommand(conversation) {
   return [
-    `Create an operation alert titled "${conversation.title}".`,
-    `Severity: ${conversation.severity || "Medium"}.`,
-    conversation.due ? `Due: ${conversation.due}.` : "No deadline.",
+    `Create an operation alert titled "${conversation.title}"`,
+    `with severity ${conversation.severity || "Medium"}`,
+    conversation.due ? `due ${conversation.due}.` : "with no deadline.",
   ].join(" ");
 }
 
@@ -1524,6 +1613,70 @@ export default function useVoiceAgent({
     }
   }
 
+  async function executeScheduleCommandText(commandToRun) {
+    setIsRunning(true);
+    setStatus("executing");
+
+    try {
+      const data = await runScheduleAssistant(commandToRun);
+
+      if (!data.ok) {
+        await respond(
+          data.summary ||
+            data.error ||
+            "I need a little more calendar detail before I can schedule that."
+        );
+        return;
+      }
+
+      const actions = [
+        data.event
+          ? {
+              type: "calendar_event",
+              status: "created",
+              title: data.event.title || "Calendar Event",
+              data: { event: data.event },
+            }
+          : null,
+        data.meeting
+          ? {
+              type: "meeting",
+              status: "created",
+              title: data.meeting.title || data.event?.title || "Meeting",
+              data: {
+                event: data.event,
+                meeting: data.meeting,
+                alarm: data.alarm,
+              },
+            }
+          : null,
+        data.alarm && !data.meeting
+          ? {
+              type: "alarm",
+              status: "created",
+              title: data.alarm.title || "Reminder",
+              data: { alarm: data.alarm },
+            }
+          : null,
+      ].filter(Boolean);
+
+      actions.forEach((action) => onAction?.(action));
+
+      const responseText = withUnderstood(data.summary || "Calendar event scheduled.");
+      const result = {
+        summary: responseText,
+        actions,
+      };
+
+      onResult?.(result);
+      await respond(responseText, result);
+    } catch {
+      await respond("I could not connect to the calendar assistant.");
+    } finally {
+      setIsRunning(false);
+    }
+  }
+
   function updatePendingConversation(conversation, reply) {
     if (conversation.type === "meeting") {
       return updateMeetingConversation(conversation, reply);
@@ -1725,6 +1878,11 @@ export default function useVoiceAgent({
     }
 
     if (await startConversation(heardCommand, finalCommand)) {
+      return;
+    }
+
+    if (hasCalendarSchedulingIntent(finalCommand)) {
+      await executeScheduleCommandText(heardCommand);
       return;
     }
 
