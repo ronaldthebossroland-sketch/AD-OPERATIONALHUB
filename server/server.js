@@ -1084,8 +1084,14 @@ function parseFlexibleDateLike(value, { requireTime = false } = {}) {
 
   const hasExplicitTime = Boolean(parseTimeParts(text));
   const directDate = new Date(value);
+  const hasExplicitNativeDate =
+    /\b\d{4}-\d{1,2}-\d{1,2}\b/.test(text) ||
+    /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/.test(text) ||
+    /\b[a-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})\b/i.test(text) ||
+    /\b\d{1,2}(?:st|nd|rd|th)?\s+[a-z]{3,9}(?:,?\s+\d{4})\b/i.test(text);
 
   if (
+    hasExplicitNativeDate &&
     !Number.isNaN(directDate.getTime()) &&
     (!requireTime ||
       hasExplicitTime ||
@@ -1176,15 +1182,45 @@ function addMinutes(date, minutes) {
 
 function parseDurationMinutes(value, fallback = 60) {
   const text = cleanText(value).toLowerCase();
-  const hourMatch = text.match(/\b(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b/i);
-  const minuteMatch = text.match(/\b(\d+)\s*(minutes?|mins?|m)\b/i);
+  const numericAmount = "(\\d+(?:\\.\\d+)?)";
+  const wordAmount =
+    "((?:(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fourty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|couple|few|half|quarter|and|of)[-\\s]*)+)";
+  const unit = "(hours?|hrs?|h|minutes?|mins?|m)";
+  const parseMatch = (match, word = false) => {
+    if (!match) {
+      return null;
+    }
 
-  if (hourMatch) {
-    return Math.max(15, Math.round(Number.parseFloat(hourMatch[1]) * 60));
+    const amount = word ? parseReminderAmount(match[1]) : Number.parseFloat(match[1]);
+    const minutes = minutesFromReminderLead(amount, normalizeReminderUnit(match[2]));
+
+    return minutes === null ? null : Math.max(15, minutes);
+  };
+  const durationPatterns = [
+    new RegExp(`\\b(?:for|duration(?:\\s+of)?|lasting|lasts?|length(?:\\s+of)?)\\s+${numericAmount}\\s*${unit}\\b`, "i"),
+    new RegExp(`\\b${numericAmount}\\s*${unit}\\s+(?:meeting|call|session|appointment|event)\\b`, "i"),
+    new RegExp(`^\\s*${numericAmount}\\s*${unit}\\s*$`, "i"),
+  ];
+  const wordDurationPatterns = [
+    new RegExp(`\\b(?:for|duration(?:\\s+of)?|lasting|lasts?|length(?:\\s+of)?)\\s+${wordAmount}\\s*${unit}\\b`, "i"),
+    new RegExp(`\\b${wordAmount}\\s*${unit}\\s+(?:meeting|call|session|appointment|event)\\b`, "i"),
+    new RegExp(`^\\s*${wordAmount}\\s*${unit}\\s*$`, "i"),
+  ];
+
+  for (const pattern of durationPatterns) {
+    const minutes = parseMatch(text.match(pattern));
+
+    if (minutes !== null) {
+      return minutes;
+    }
   }
 
-  if (minuteMatch) {
-    return Math.max(15, Number.parseInt(minuteMatch[1], 10));
+  for (const pattern of wordDurationPatterns) {
+    const minutes = parseMatch(text.match(pattern), true);
+
+    if (minutes !== null) {
+      return minutes;
+    }
   }
 
   return fallback;
@@ -1350,6 +1386,28 @@ function minutesFromReminderLead(amount, unit) {
 
 function minutesBeforeValue(value) {
   const text = cleanText(value);
+  const numericAmount = "(\\d+(?:\\.\\d+)?)";
+  const wordAmount =
+    "((?:(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fourty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|couple|few|half|quarter|and|of)[-\\s]*)+)";
+  const unit = "(m|mins?|minu?t?e?s?|minues|mintes|mns?|h|hrs?|hours?|d|days?)";
+  const wordUnit = "(minutes?|mins?|minu?t?e?s?|minues|mintes|mns?|hours?|hrs?|days?)";
+  const leadCue = "(?:before|early|earlier|ahead|prior|pre|notice|advance|in\\s+advance)";
+  const intentCue = "(?:remind|notify|alert)";
+  const reminderNoun = "(?:reminder|alarm|alert|notification|notice)";
+  const parseNumeric = (match) =>
+    match
+      ? minutesFromReminderLead(
+          Number.parseFloat(match[1]),
+          normalizeReminderUnit(match[2])
+        )
+      : null;
+  const parseWord = (match) =>
+    match
+      ? minutesFromReminderLead(
+          parseReminderAmount(match[1]),
+          normalizeReminderUnit(match[2])
+        )
+      : null;
 
   if (/\b(?:a\s+)?quarter\s+(?:of\s+)?(?:an?\s+)?hour\b/i.test(text)) {
     return 15;
@@ -1359,26 +1417,36 @@ function minutesBeforeValue(value) {
     return 30;
   }
 
-  const numericMatch = text.match(
-    /\b(\d+(?:\.\d+)?)\s*(m|mins?|minu?t?e?s?|minues|mintes|mns?|h|hrs?|hours?|d|days?)\b(?:\s*(?:before|early|earlier|ahead|prior|pre|notice|advance))?/i
-  );
+  const numericMatches = [
+    new RegExp(`^\\s*${numericAmount}\\s*${unit}(?:\\s*${leadCue})?\\s*$`, "i"),
+    new RegExp(`\\b${numericAmount}\\s*${unit}\\b\\s*${leadCue}\\b`, "i"),
+    new RegExp(`\\b${intentCue}\\s+(?:me|us|the\\s+team|everyone|him|her|them)?\\s*(?:about\\s+)?${numericAmount}\\s*${unit}\\b`, "i"),
+    new RegExp(`\\b(?:set|create|add|make)\\s+(?:a|an)?\\s*${reminderNoun}\\s+(?:for\\s+)?${numericAmount}\\s*${unit}\\b`, "i"),
+    new RegExp(`\\b${numericAmount}\\s*${unit}\\b(?:[\\s-]+${reminderNoun}\\b)`, "i"),
+  ];
 
-  if (numericMatch) {
-    return minutesFromReminderLead(
-      Number.parseFloat(numericMatch[1]),
-      normalizeReminderUnit(numericMatch[2])
-    );
+  for (const pattern of numericMatches) {
+    const minutes = parseNumeric(text.match(pattern));
+
+    if (minutes !== null) {
+      return minutes;
+    }
   }
 
-  const wordMatch = text.match(
-    /\b((?:(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fourty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|couple|few|half|quarter|and|of)[-\s]*)+)\s*(minutes?|mins?|minu?t?e?s?|minues|mintes|mns?|hours?|hrs?|days?)\b(?:\s*(?:before|early|earlier|ahead|prior|pre|notice|advance))?/i
-  );
+  const wordMatches = [
+    new RegExp(`^\\s*${wordAmount}\\s*${wordUnit}(?:\\s*${leadCue})?\\s*$`, "i"),
+    new RegExp(`\\b${wordAmount}\\s*${wordUnit}\\b\\s*${leadCue}\\b`, "i"),
+    new RegExp(`\\b${intentCue}\\s+(?:me|us|the\\s+team|everyone|him|her|them)?\\s*(?:about\\s+)?${wordAmount}\\s*${wordUnit}\\b`, "i"),
+    new RegExp(`\\b(?:set|create|add|make)\\s+(?:a|an)?\\s*${reminderNoun}\\s+(?:for\\s+)?${wordAmount}\\s*${wordUnit}\\b`, "i"),
+    new RegExp(`\\b${wordAmount}\\s*${wordUnit}\\b(?:[\\s-]+${reminderNoun}\\b)`, "i"),
+  ];
 
-  if (wordMatch) {
-    return minutesFromReminderLead(
-      parseReminderAmount(wordMatch[1]),
-      normalizeReminderUnit(wordMatch[2])
-    );
+  for (const pattern of wordMatches) {
+    const minutes = parseWord(text.match(pattern));
+
+    if (minutes !== null) {
+      return minutes;
+    }
   }
 
   return null;
@@ -1436,7 +1504,7 @@ function resolveMeetingStartDate(data, command) {
   return null;
 }
 
-function resolveMeetingEndDate(data, startDate) {
+function resolveMeetingEndDate(data, startDate, command = "") {
   if (!startDate) {
     return null;
   }
@@ -1449,7 +1517,10 @@ function resolveMeetingEndDate(data, startDate) {
     }
   }
 
-  return addMinutes(startDate, parseDurationMinutes(data?.duration));
+  return addMinutes(
+    startDate,
+    parseDurationMinutes(data?.duration, null) || parseDurationMinutes(command)
+  );
 }
 
 function meetingAlarmMinutesBefore(data, command, hasStartDate) {
@@ -4485,6 +4556,7 @@ function buildHubSources(context, question) {
   const terms = cleanText(question)
     .toLowerCase()
     .split(/\s+/)
+    .map((term) => term.replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, ""))
     .filter((term) => term.length > 2);
 
   return Object.entries(sourceGroups)
@@ -4803,7 +4875,7 @@ async function executeCommandAction(action, req, context, createdRecords, comman
       }
 
       const startDate = resolveMeetingStartDate(actionData, command);
-      const endDate = resolveMeetingEndDate(actionData, startDate);
+      const endDate = resolveMeetingEndDate(actionData, startDate, command);
       const displayTime = startDate
         ? formatDateTimeForMeeting(startDate)
         : cleanText(actionData.time);
