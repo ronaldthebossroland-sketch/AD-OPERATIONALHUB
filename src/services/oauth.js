@@ -31,15 +31,7 @@ function ensureHttpAuthUrl(url) {
 async function openNativeAuthUrl(url) {
   const safeUrl = ensureHttpAuthUrl(url);
 
-  try {
-    await AuthBrowser.open({ url: safeUrl });
-  } catch (error) {
-    console.warn("Falling back to Capacitor Browser for OAuth:", error);
-    await Browser.open({
-      presentationStyle: "fullscreen",
-      url: safeUrl,
-    });
-  }
+  await AuthBrowser.open({ url: safeUrl });
 }
 
 function ensureSupabaseAuth() {

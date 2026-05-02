@@ -1,8 +1,10 @@
 package com.adoperationalhub.app;
 
-import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.net.Uri;
+import java.util.List;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -32,10 +34,15 @@ public class AuthBrowserPlugin extends Plugin {
         }
 
         Uri uri = Uri.parse(url);
+        PackageManager packageManager = getContext().getPackageManager();
 
         for (String browserPackage : BROWSER_PACKAGES) {
             Intent intent = createBrowserIntent(uri);
             intent.setPackage(browserPackage);
+
+            if (!hasBrowserActivity(packageManager, intent)) {
+                continue;
+            }
 
             try {
                 getContext().startActivity(intent);
@@ -43,17 +50,12 @@ public class AuthBrowserPlugin extends Plugin {
                 result.put("packageName", browserPackage);
                 call.resolve(result);
                 return;
-            } catch (ActivityNotFoundException | SecurityException exception) {
-                // Try the next installed browser before falling back to Android's resolver.
+            } catch (SecurityException exception) {
+                // Try the next trusted browser package.
             }
         }
 
-        try {
-            getContext().startActivity(createBrowserIntent(uri));
-            call.resolve();
-        } catch (ActivityNotFoundException | SecurityException exception) {
-            call.reject("Android could not open a browser for Google sign-in.", exception);
-        }
+        call.reject("No trusted browser app is available for Google sign-in.");
     }
 
     private Intent createBrowserIntent(Uri uri) {
@@ -62,5 +64,14 @@ public class AuthBrowserPlugin extends Plugin {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
         return intent;
+    }
+
+    private boolean hasBrowserActivity(PackageManager packageManager, Intent intent) {
+        List<ResolveInfo> activities = packageManager.queryIntentActivities(
+            intent,
+            PackageManager.MATCH_DEFAULT_ONLY
+        );
+
+        return activities != null && !activities.isEmpty();
     }
 }

@@ -741,6 +741,14 @@ function getSafeAppReturnUrl(value, fallbackPath = "/") {
   }
 }
 
+function setUrlParam(url, key, value) {
+  const parsedUrl = new URL(url, APP_HOME_URL);
+
+  parsedUrl.searchParams.set(key, value);
+
+  return parsedUrl.toString();
+}
+
 function getProviderTokenExpiry(expiresAt, expiresIn) {
   const parsedExpiresAt = Number.parseInt(expiresAt, 10);
 
@@ -1601,12 +1609,16 @@ function calendarSourceEvent({
 
 function startGmailOAuth(req, res) {
   try {
-    const oauth2Client = createGoogleClient();
     const returnTo = getSafeAppReturnUrl(
       req.query.returnTo,
       "/?view=emails&gmail=connected"
     );
 
+    if (!req.session.user?.email) {
+      return res.redirect(setUrlParam(returnTo, "gmail", "login-required"));
+    }
+
+    const oauth2Client = createGoogleClient();
     const url = oauth2Client.generateAuthUrl({
       access_type: "offline",
       include_granted_scopes: true,
