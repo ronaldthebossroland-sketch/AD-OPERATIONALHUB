@@ -20,15 +20,20 @@ Render backend:
 
 ## Android APK With Capacitor
 
-The Android wrapper uses Capacitor and keeps the existing web deployment intact.
+The Android wrapper uses Capacitor and bundles the production web build into the
+APK. API requests still go to the Render backend.
 
 Capacitor app settings:
 
 - App name: `Executive Virtual AI Assistant`
 - App ID: `com.adoperationalhub.app`
 - Web directory: `dist`
-- Live URL: `https://ad-operationalhub-seven.vercel.app`
 - Backend API URL for production web builds: `https://ad-operationalhub.onrender.com`
+- Optional live-server dev mode: set `CAPACITOR_LIVE_SERVER=true` before
+  running `npx cap sync android`
+- Optional system Clock alarms: set `VITE_ENABLE_SYSTEM_CLOCK_ALARMS=true`
+  before building if you want Android Clock alarms in addition to app
+  notifications. By default the APK uses cancellable local notifications.
 
 No backend API keys or service role secrets belong in the Android or React app.
 

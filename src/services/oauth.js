@@ -219,13 +219,30 @@ export async function completeSupabaseAuthFromUrl(url) {
   return syncAppSessionFromSupabase(authParams);
 }
 
-export async function registerOAuthDeepLinkHandler(onUser) {
+export async function registerOAuthDeepLinkHandler(onUser, onAppReturn) {
   if (!Capacitor.isNativePlatform()) {
     return () => {};
   }
 
   async function handleUrl(url) {
+    let parsedUrl;
+
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return;
+    }
+
     if (!isOAuthReturnUrl(url)) {
+      const isNativeAppReturn =
+        parsedUrl.protocol === "capacitor:" &&
+        parsedUrl.host === "localhost";
+
+      if (isNativeAppReturn) {
+        await Browser.close().catch(() => {});
+        onAppReturn?.(parsedUrl);
+      }
+
       return;
     }
 

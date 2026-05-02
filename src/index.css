@@ -908,3 +908,149 @@ body,
   font-weight: 700;
   line-height: 1.6;
 }
+
+@media (max-width: 767px) {
+  #root,
+  .luxury-app {
+    min-height: 100dvh;
+  }
+
+  .luxury-app {
+    overflow: hidden;
+  }
+
+  .luxury-main {
+    padding: calc(1rem + env(safe-area-inset-top)) 0.85rem
+      calc(6.35rem + env(safe-area-inset-bottom)) !important;
+  }
+
+  .luxury-header {
+    margin-bottom: 1.25rem !important;
+    gap: 1rem !important;
+  }
+
+  .luxury-title {
+    font-size: clamp(1.85rem, 7vw, 2.35rem) !important;
+    line-height: 1.05 !important;
+  }
+
+  .luxury-header p {
+    max-width: 34rem;
+    font-size: 0.9rem !important;
+    line-height: 1.45 !important;
+  }
+
+  .luxury-search-input {
+    min-height: 3rem;
+  }
+
+  .luxury-main .gap-6 {
+    gap: 1rem !important;
+  }
+
+  #root main .rounded-3xl {
+    border-radius: 1.15rem !important;
+  }
+
+  #root main .p-6 {
+    padding: 1rem !important;
+  }
+
+  #root main .min-h-\[28rem\] {
+    min-height: auto !important;
+  }
+
+  .calendar-scroll,
+  .luxury-mobile-nav {
+    scrollbar-width: none;
+  }
+
+  .calendar-scroll::-webkit-scrollbar,
+  .luxury-mobile-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .calendar-month-grid {
+    min-width: 38rem !important;
+  }
+
+  .calendar-month-grid .min-h-28 {
+    min-height: 6.75rem !important;
+  }
+
+  .luxury-mobile-nav {
+    padding-right: max(0.5rem, env(safe-area-inset-right)) !important;
+    padding-bottom: calc(0.55rem + env(safe-area-inset-bottom)) !important;
+    padding-left: max(0.5rem, env(safe-area-inset-left)) !important;
+  }
+
+  .luxury-mobile-nav button {
+    flex: 0 0 auto;
+    min-width: 4.25rem !important;
+  }
+
+  .voice-home {
+    min-height: calc(100dvh - 12rem) !important;
+    padding: 2rem 0.25rem !important;
+  }
+
+  .voice-home__button {
+    width: min(72vw, 16.5rem);
+    height: min(72vw, 16.5rem);
+    min-width: 11.5rem;
+    min-height: 11.5rem;
+  }
+
+  .voice-home__status {
+    padding: 0 0.75rem;
+    font-size: 0.92rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .luxury-header .luxury-header-action-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .luxury-header button svg {
+    margin-right: 0 !important;
+  }
+
+  .luxury-header button {
+    padding-right: 0.75rem !important;
+    padding-left: 0.75rem !important;
+  }
+
+  .calendar-month-grid {
+    min-width: 34rem !important;
+  }
+
+  .luxury-mobile-nav button {
+    min-width: 4rem !important;
+    font-size: 0.64rem !important;
+  }
+
+  .voice-home__button {
+    width: min(74vw, 15rem);
+    height: min(74vw, 15rem);
+    min-width: 10.75rem;
+    min-height: 10.75rem;
+  }
+}
+
+@media (min-width: 600px) and (max-width: 1100px) {
+  .luxury-main {
+    padding-right: 1.25rem !important;
+    padding-left: 1.25rem !important;
+  }
+
+  .voice-home__button {
+    width: min(46vw, 18rem);
+    height: min(46vw, 18rem);
+  }
+}

@@ -41,11 +41,11 @@ export default function NotificationBell({
       <Button
         onClick={openFirst}
         variant="outline"
-        className="relative min-w-0 rounded-2xl bg-white px-3 py-3 text-xs sm:text-sm"
+        className="relative h-12 min-w-0 rounded-2xl bg-white px-3 py-3 text-xs sm:text-sm"
         title="Mission Control alerts"
       >
         <Bell className="mr-2 h-4 w-4 shrink-0" />
-        <span className="truncate">Alerts</span>
+        <span className="luxury-header-action-text truncate">Alerts</span>
         {alertCount > 0 && (
           <span className="luxury-alert-badge absolute -right-1 -top-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-black text-white">
             {alertCount}

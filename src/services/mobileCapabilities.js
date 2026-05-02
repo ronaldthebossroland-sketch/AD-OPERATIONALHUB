@@ -3,9 +3,11 @@ import { LocalNotifications } from "@capacitor/local-notifications";
 
 const NativeAlarm = registerPlugin("NativeAlarm");
 
-const REMINDER_CHANNEL_ID = "executive-reminders";
+const REMINDER_CHANNEL_ID = "executive-reminders-v2";
 const REMINDER_NOTIFICATION_BASE_ID = 200000;
 const PHONE_ALARM_WINDOW_MS = 24 * 60 * 60 * 1000;
+const ENABLE_SYSTEM_CLOCK_ALARMS =
+  import.meta.env.VITE_ENABLE_SYSTEM_CLOCK_ALARMS === "true";
 
 let channelReady = false;
 let permissionRequest = null;
@@ -74,6 +76,7 @@ async function ensureReminderChannel() {
       visibility: 1,
       lights: true,
       lightColor: "#D8AF55",
+      sound: "executive_chime.wav",
       vibration: true,
     });
   } finally {
@@ -96,7 +99,13 @@ export async function ensureNotificationPermissions() {
 
       await ensureReminderChannel();
 
-      return permissions;
+      try {
+        const exactAlarm = await LocalNotifications.checkExactNotificationSetting();
+        return { ...permissions, ...exactAlarm };
+      } catch {
+        return permissions;
+      }
+
     })().finally(() => {
       permissionRequest = null;
     });
@@ -172,8 +181,18 @@ export async function scheduleDeviceReminder(reminder, options = {}) {
       {
         id: notificationId,
         title: reminder?.title || "Executive reminder",
-        body: reminder?.notes || reminder?.reminder_time || "You have an upcoming executive item.",
+        body:
+          reminder?.notes ||
+          reminder?.reminder_time ||
+          "Your executive reminder is due.",
+        largeBody:
+          reminder?.notes ||
+          reminder?.reminder_time ||
+          "Your executive reminder is due.",
+        summaryText: "Executive Virtual AI Assistant",
         channelId: REMINDER_CHANNEL_ID,
+        sound: "executive_chime.wav",
+        iconColor: "#111827",
         schedule: {
           at: dueDate,
           allowWhileIdle: true,
@@ -187,9 +206,9 @@ export async function scheduleDeviceReminder(reminder, options = {}) {
     ],
   });
 
-  const phoneAlarm = options.setNativeAlarm
+  const phoneAlarm = options.setNativeAlarm && ENABLE_SYSTEM_CLOCK_ALARMS
     ? await setNativePhoneAlarm(reminder, dueDate)
-    : { scheduled: false };
+    : { scheduled: false, mode: "local-notification" };
 
   return {
     scheduled: true,

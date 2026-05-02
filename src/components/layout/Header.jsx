@@ -168,8 +168,8 @@ export default function Header({
         </p>
       </div>
 
-      <div className="relative grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:items-center">
-        <div className="relative col-span-2 sm:col-span-1">
+      <div className="relative grid w-full grid-cols-2 gap-2 sm:grid-cols-4 md:flex md:w-auto md:items-center md:gap-3">
+        <div className="relative col-span-2 sm:col-span-4 md:col-span-1">
           <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={query}
@@ -220,10 +220,10 @@ export default function Header({
         <Button
           onClick={() => setBriefOpen((isOpen) => !isOpen)}
           variant="outline"
-          className="min-w-0 rounded-2xl bg-white px-3 py-3 text-xs sm:text-sm"
+          className="h-12 min-w-0 rounded-2xl bg-white px-3 py-3 text-xs sm:text-sm"
         >
           <Sparkles className="mr-2 h-4 w-4 shrink-0" />
-          <span className="truncate">Focus Brief</span>
+          <span className="luxury-header-action-text truncate">Focus Brief</span>
         </Button>
 
         <NotificationBell
@@ -241,20 +241,20 @@ export default function Header({
         {canManageOperations && (
           <Button
             onClick={() => openView("meetings")}
-            className="min-w-0 rounded-2xl px-3 py-3 text-xs sm:text-sm"
+            className="h-12 min-w-0 rounded-2xl px-3 py-3 text-xs sm:text-sm"
           >
             <Plus className="mr-2 h-4 w-4 shrink-0" />
-            <span className="truncate">New Meeting</span>
+            <span className="luxury-header-action-text truncate">New Meeting</span>
           </Button>
         )}
 
         <Button
           onClick={onLogout}
           variant="outline"
-          className="min-w-0 rounded-2xl bg-white px-3 py-3 text-xs text-red-600 sm:text-sm"
+          className="h-12 min-w-0 rounded-2xl bg-white px-3 py-3 text-xs text-red-600 sm:text-sm"
         >
           <LogOut className="mr-2 h-4 w-4 shrink-0" />
-          <span className="truncate">Sign Out</span>
+          <span className="luxury-header-action-text truncate">Sign Out</span>
         </Button>
 
         {briefOpen && (

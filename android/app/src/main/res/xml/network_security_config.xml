@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">ad-operationalhub-seven.vercel.app</domain>
+        <domain includeSubdomains="true">ad-operationalhub.onrender.com</domain>
+        <domain includeSubdomains="true">fwoisysufauefhsrrxgr.supabase.co</domain>
+        <domain includeSubdomains="true">deepgram.com</domain>
+        <domain includeSubdomains="true">google.com</domain>
+        <domain includeSubdomains="true">googleapis.com</domain>
+    </domain-config>
+</network-security-config>

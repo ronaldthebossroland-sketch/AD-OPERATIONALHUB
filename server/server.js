@@ -29,6 +29,7 @@ const DEFAULT_APP_ORIGINS = [
   PRODUCTION_APP_HOME_URL,
   LOCAL_APP_HOME_URL,
   "http://localhost",
+  "https://localhost",
   "capacitor://localhost",
 ];
 const ALLOWED_ORIGINS = Array.from(
@@ -45,6 +46,8 @@ const ALLOWED_ORIGINS = Array.from(
 );
 const VERCEL_DEPLOYMENT_ORIGIN_PATTERN =
   /^https:\/\/ad-operationalhub(?:-[a-z0-9-]+)?\.vercel\.app$/i;
+const LOCALHOST_ORIGIN_PATTERN =
+  /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i;
 const APP_USER_COLUMNS =
   "id,name,email,role,access,is_active,auth_provider,created_at";
 const APP_USER_AUTH_COLUMNS = `${APP_USER_COLUMNS},password_hash`;
@@ -71,6 +74,7 @@ app.use(
       if (
         !normalizedOrigin ||
         ALLOWED_ORIGINS.includes(normalizedOrigin) ||
+        LOCALHOST_ORIGIN_PATTERN.test(normalizedOrigin) ||
         VERCEL_DEPLOYMENT_ORIGIN_PATTERN.test(normalizedOrigin)
       ) {
         callback(null, true);

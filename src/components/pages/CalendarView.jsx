@@ -415,7 +415,8 @@ export default function CalendarView({ setMeetings, setReminders }) {
             </div>
 
             {view === "month" ? (
-              <div className="grid grid-cols-7 gap-2">
+              <div className="calendar-scroll overflow-x-auto pb-2">
+              <div className="calendar-month-grid grid min-w-[42rem] grid-cols-7 gap-2">
                 {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
                   <div
                     key={day}
@@ -459,6 +460,7 @@ export default function CalendarView({ setMeetings, setReminders }) {
                     </button>
                   );
                 })}
+              </div>
               </div>
             ) : (
               <div className="grid gap-3">

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { App as CapacitorApp } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 import { motion } from "framer-motion";
 import { ShieldAlert } from "lucide-react";
 
@@ -171,11 +173,28 @@ export default function ADOperationalHub() {
       window.history.replaceState({}, document.title, "/");
     }
 
-    registerOAuthDeepLinkHandler((user) => {
-      if (isMounted) {
-        handleAuthComplete(user);
+    registerOAuthDeepLinkHandler(
+      (user) => {
+        if (isMounted) {
+          handleAuthComplete(user);
+        }
+      },
+      (returnUrl) => {
+        if (!isMounted) {
+          return;
+        }
+
+        const requestedView = returnUrl.searchParams.get("view");
+
+        if (viewAccess[requestedView]) {
+          setActiveView(requestedView);
+        }
+
+        if (window.history?.replaceState) {
+          window.history.replaceState({}, document.title, "/");
+        }
       }
-    })
+    )
       .then((removeHandler) => {
         if (!isMounted) {
           removeHandler();
@@ -308,6 +327,30 @@ export default function ADOperationalHub() {
     }
 
     syncDeviceReminders(reminders);
+  }, [currentUser, reminders]);
+
+  useEffect(() => {
+    if (!currentUser || !Capacitor.isNativePlatform()) {
+      return undefined;
+    }
+
+    let listener;
+
+    CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+      if (isActive) {
+        syncDeviceReminders(reminders);
+      }
+    })
+      .then((handle) => {
+        listener = handle;
+      })
+      .catch((error) => {
+        console.warn("Could not register Android reminder resume sync:", error);
+      });
+
+    return () => {
+      listener?.remove();
+    };
   }, [currentUser, reminders]);
 
   useEffect(() => {

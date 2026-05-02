@@ -1,3 +1,5 @@
+import { Capacitor } from "@capacitor/core";
+
 function trimTrailingSlash(value) {
   return String(value || "").replace(/\/+$/, "");
 }
@@ -20,10 +22,16 @@ function getApiBaseUrl() {
   return "http://localhost:5000";
 }
 
+function getAppHomeUrl() {
+  if (Capacitor.isNativePlatform()) {
+    return "capacitor://localhost";
+  }
+
+  return import.meta.env.VITE_APP_HOME_URL || getBrowserOrigin();
+}
+
 export const API_BASE_URL = getApiBaseUrl();
-export const APP_HOME_URL = trimTrailingSlash(
-  import.meta.env.VITE_APP_HOME_URL || getBrowserOrigin()
-);
+export const APP_HOME_URL = trimTrailingSlash(getAppHomeUrl());
 export const TRANSCRIPTION_WS_URL = (() => {
   const configuredUrl = import.meta.env.VITE_TRANSCRIPTION_WS_URL;
 

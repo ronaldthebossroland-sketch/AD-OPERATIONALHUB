@@ -1,6 +1,7 @@
 package com.adoperationalhub.app;
 
 import android.content.Intent;
+import android.content.ActivityNotFoundException;
 import android.provider.AlarmClock;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -35,7 +36,12 @@ public class NativeAlarmPlugin extends Plugin {
             return;
         }
 
-        getContext().startActivity(intent);
+        try {
+            getContext().startActivity(intent);
+        } catch (ActivityNotFoundException | SecurityException exception) {
+            call.reject("Android could not open the clock app to set this alarm.", exception);
+            return;
+        }
 
         JSObject result = new JSObject();
         result.put("scheduled", true);
@@ -55,7 +61,12 @@ public class NativeAlarmPlugin extends Plugin {
             return;
         }
 
-        getContext().startActivity(intent);
+        try {
+            getContext().startActivity(intent);
+        } catch (ActivityNotFoundException | SecurityException exception) {
+            call.reject("Android could not open the clock app.", exception);
+            return;
+        }
         call.resolve();
     }
 }

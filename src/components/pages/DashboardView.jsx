@@ -1110,7 +1110,7 @@ export default function DashboardView({
   return (
     <div className="grid gap-6 xl:grid-cols-12">
       <div className="xl:col-span-8">
-        <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <SummaryCard
             icon={CalendarDays}
             label="Meetings"
