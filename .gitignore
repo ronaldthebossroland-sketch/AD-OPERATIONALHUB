@@ -26,3 +26,9 @@ server/*.db-*
 *.njsproj
 *.sln
 *.sw?
+
+.vercel
+.expo
+.claude
+eva-expo-ui/android
+eva-expo-ui/ios

@@ -405,6 +405,44 @@ async function getOrCreateGoogleUser(email, name) {
   return { user: data || null, error, created: Boolean(data) };
 }
 
+async function getOrCreateSupabaseAuthUser(email, name, authProvider = "supabase") {
+  const finalEmail = normalizeEmail(email);
+
+  if (!finalEmail) {
+    return { user: null, error: new Error("Supabase profile email is required.") };
+  }
+
+  const { user: existingUser, error: lookupError } =
+    await getAppUserByEmail(finalEmail);
+
+  if (lookupError) {
+    return { user: null, error: lookupError };
+  }
+
+  if (existingUser) {
+    return {
+      user: existingUser.is_active === true ? existingUser : null,
+      error: null,
+      inactive: existingUser.is_active !== true,
+    };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("app_users")
+    .insert({
+      name: cleanText(name) || finalEmail,
+      email: finalEmail,
+      role: "Admin",
+      access: "Full Access",
+      auth_provider: cleanText(authProvider, "supabase") || "supabase",
+      is_active: true,
+    })
+    .select(APP_USER_COLUMNS)
+    .single();
+
+  return { user: data || null, error, created: Boolean(data) };
+}
+
 async function getGoogleProfile(oauth2Client, tokens) {
   if (tokens.id_token) {
     const ticket = await oauth2Client.verifyIdToken({
@@ -997,26 +1035,22 @@ async function getUserFromSupabaseAccessToken(accessToken) {
   const email = normalizeEmail(supabaseUser?.email);
 
   if (!email) {
-    throw new Error("Google profile email is required.");
+    throw new Error("Supabase profile email is required.");
   }
 
   const provider =
     supabaseUser.app_metadata?.provider ||
-    supabaseUser.app_metadata?.providers?.[0];
-
-  if (provider && provider !== "google") {
-    const providerError = new Error("Use Google to sign in.");
-    providerError.status = 403;
-    throw providerError;
-  }
+    supabaseUser.app_metadata?.providers?.[0] ||
+    "supabase";
 
   const name =
     cleanText(supabaseUser.user_metadata?.full_name) ||
     cleanText(supabaseUser.user_metadata?.name) ||
     email;
-  const { user, error: userError, inactive } = await getOrCreateGoogleUser(
+  const { user, error: userError, inactive } = await getOrCreateSupabaseAuthUser(
     email,
-    name
+    name,
+    provider === "google" ? "google" : provider
   );
 
   if (userError) {
@@ -2027,8 +2061,8 @@ app.post("/api/auth/supabase", async (req, res) => {
     if (!user) {
       return res.status(403).json({
         error: inactive
-          ? "This Google account has been deactivated for Executive Virtual AI Assistant."
-          : "This Google account could not be authorized for Executive Virtual AI Assistant.",
+          ? "This account has been deactivated for Executive Virtual AI Assistant."
+          : "This account could not be authorized for Executive Virtual AI Assistant.",
       });
     }
 
@@ -3705,6 +3739,67 @@ app.post(
     res.json({ ticket });
   }
 );
+
+app.post(
+  "/api/transcription-upload",
+  requireRole(...ADMIN_ROLES),
+  express.raw({
+    type: ["audio/*", "application/octet-stream"],
+    limit: "30mb",
+  }),
+  async (req, res) => {
+    try {
+      if (!deepgram) {
+        return res.status(503).json({
+          error: "Deepgram transcription is not configured on the backend.",
+        });
+      }
+
+      const audioBuffer = Buffer.isBuffer(req.body)
+        ? req.body
+        : Buffer.from(req.body || []);
+
+      if (!audioBuffer.length) {
+        return res.status(400).json({ error: "Audio data is required." });
+      }
+
+      const response = await deepgram.listen.v1.media.transcribeFile(
+        audioBuffer,
+        {
+          model: process.env.DEEPGRAM_TRANSCRIBE_MODEL?.trim() || "nova-3",
+          punctuate: true,
+          smart_format: true,
+        }
+      );
+      const transcript = extractDeepgramTranscript(response);
+
+      res.json({
+        transcript,
+        confidence: extractDeepgramConfidence(response),
+      });
+    } catch (error) {
+      console.error("Deepgram upload transcription error:", error);
+      res.status(500).json({ error: "Could not transcribe uploaded audio." });
+    }
+  }
+);
+
+function extractDeepgramTranscript(response) {
+  return (
+    response?.results?.channels
+      ?.flatMap((channel) => channel.alternatives || [])
+      ?.map((alternative) => cleanText(alternative.transcript))
+      ?.filter(Boolean)
+      ?.join("\n")
+      ?.trim() || ""
+  );
+}
+
+function extractDeepgramConfidence(response) {
+  const confidence = response?.results?.channels?.[0]?.alternatives?.[0]?.confidence;
+
+  return typeof confidence === "number" ? confidence : null;
+}
 
 /* =========================
    MULTI-INTENT COMMAND ENGINE
@@ -5834,6 +5929,88 @@ app.get("/api/command-logs", requireRole(...ADMIN_ROLES), async (req, res) => {
 /* =========================
    AI ROUTE
 ========================= */
+
+app.post("/api/assistant/chat", requireLogin, async (req, res) => {
+  try {
+    const messages = normalizeAssistantMessages(req.body.messages);
+    const lastUserMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "user");
+
+    if (!lastUserMessage) {
+      return res.status(400).json({
+        error: "At least one user message is required.",
+      });
+    }
+
+    const reply = await askAI(`
+You are EVA, the Executive Virtual Assistant.
+You are a premium, calm, direct executive AI assistant for operations, meetings,
+decisions, transcripts, reminders, and daily workflow.
+
+Answer general questions, app questions, and simple command explanations.
+For this mobile endpoint, do not create, update, or delete records yet.
+If the user asks to create a meeting, task, reminder, operation, or transcript,
+explain the next clear step and the detail you would need.
+
+Return a concise natural-language reply only.
+
+Conversation:
+${messages.map((message) => `${message.role}: ${message.content}`).join("\n")}
+    `);
+
+    res.json({
+      reply,
+      intent: inferAssistantIntent(lastUserMessage.content),
+      actions: [],
+    });
+  } catch (error) {
+    console.error("Assistant chat error:", error);
+    res.status(500).json({
+      error: "EVA could not respond right now.",
+    });
+  }
+});
+
+function normalizeAssistantMessages(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((message) => ({
+      role: message?.role === "assistant" ? "assistant" : "user",
+      content: cleanText(message?.content || message?.text).slice(0, 4000),
+    }))
+    .filter((message) => message.content)
+    .slice(-16);
+}
+
+function inferAssistantIntent(text) {
+  const command = cleanText(text).toLowerCase();
+
+  if (/\b(meeting|schedule|calendar|appointment)\b/.test(command)) {
+    return "calendar";
+  }
+
+  if (/\b(task|operation|risk|priority|attention|follow[-\s]?up)\b/.test(command)) {
+    return "operations";
+  }
+
+  if (/\b(transcript|transcribe|record|summary|summarize)\b/.test(command)) {
+    return "transcripts";
+  }
+
+  if (/\b(setting|voice|notification|profile|logout)\b/.test(command)) {
+    return "settings";
+  }
+
+  if (/\b(brief|today|next move|prepare)\b/.test(command)) {
+    return "briefing";
+  }
+
+  return "general";
+}
 
 app.post("/api/ai", requireLogin, async (req, res) => {
   try {

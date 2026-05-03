@@ -123,7 +123,7 @@ export default function ADOperationalHub() {
   const [activities, setActivities] = useState([]);
   const [operations, setOperations] = useState([]);
   const [transcriptionAutoStartKey, setTranscriptionAutoStartKey] = useState(0);
-  const [gmailRefreshKey, setGmailRefreshKey] = useState(0);
+  const [, setGmailRefreshKey] = useState(0);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState("");
   const mainScrollRef = useRef(null);

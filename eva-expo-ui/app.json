@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Executive Virtual Assistant",
+    "slug": "executive-virtual-assistant",
+    "scheme": "evaassistant",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.adoperationalhub.eva",
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "INTERNET",
+        "RECORD_AUDIO"
+      ]
+    },
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "EVA uses the microphone to record transcripts when you choose to start recording."
+      }
+    },
+    "plugins": [
+      "expo-web-browser",
+      "expo-audio",
+      "expo-font",
+      "expo-system-ui"
+    ]
+  }
+}
