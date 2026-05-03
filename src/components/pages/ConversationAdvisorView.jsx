@@ -1,4 +1,5 @@
 import { Loader2, MessageSquareQuote, Sparkles, Trash2 } from "lucide-react";
+
 import { useState } from "react";
 
 import { getConversationAdvice } from "../../services/api";
@@ -48,6 +49,7 @@ export default function ConversationAdvisorView() {
   return (
     <div className="space-y-6">
       <SectionHeader
+        icon={MessageSquareQuote}
         title="Conversation Advisor"
         subtitle="Paste any conversation and get executive-level advice on how to respond."
       />
