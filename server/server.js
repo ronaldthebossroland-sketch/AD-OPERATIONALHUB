@@ -168,6 +168,29 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware);
 
+// Fallback auth for browsers that block cross-domain cookies (e.g. Samsung Internet).
+// If a valid Supabase Bearer token is present and no session cookie was set, we hydrate
+// req.session.user from it so all downstream requireRole checks still pass.
+app.use(async (req, res, next) => {
+  if (req.session.user) return next();
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return next();
+  const token = auth.slice(7);
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user?.email) return next();
+    const { data: appUser } = await supabaseAdmin
+      .from("app_users")
+      .select(APP_USER_COLUMNS)
+      .eq("email", normalizeEmail(user.email))
+      .maybeSingle();
+    if (appUser?.is_active) setSessionUser(req, appUser);
+  } catch {
+    // invalid token — proceed unauthenticated
+  }
+  next();
+});
+
 const deepgramApiKey = process.env.DEEPGRAM_API_KEY?.trim();
 const deepgram = deepgramApiKey
   ? new DeepgramClient({ apiKey: deepgramApiKey })

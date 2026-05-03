@@ -1,4 +1,15 @@
 import { Capacitor } from "@capacitor/core";
+import { supabase } from "./supabaseClient";
+
+async function getSupabaseAccessToken() {
+  try {
+    if (!supabase) return null;
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token || null;
+  } catch {
+    return null;
+  }
+}
 
 function trimTrailingSlash(value) {
   return String(value || "").replace(/\/+$/, "");
@@ -63,10 +74,12 @@ async function parseResponseJson(res) {
 }
 
 async function requestJson(path, options = {}) {
+  const token = await getSupabaseAccessToken();
   const res = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
     ...options,
