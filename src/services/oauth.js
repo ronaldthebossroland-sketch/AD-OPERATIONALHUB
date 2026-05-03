@@ -16,13 +16,7 @@ import {
   SUPABASE_WEB_REDIRECT_URL,
 } from "./supabaseClient";
 
-const GOOGLE_LOGIN_SCOPES = [
-  "openid",
-  "email",
-  "profile",
-  "https://www.googleapis.com/auth/gmail.readonly",
-  "https://www.googleapis.com/auth/gmail.send",
-].join(" ");
+const GOOGLE_LOGIN_SCOPES = ["openid", "email", "profile"].join(" ");
 const GOOGLE_PROVIDER_AUTH_STORAGE_KEY = "eva_google_provider_auth";
 const AuthBrowser = registerPlugin("AuthBrowser");
 
