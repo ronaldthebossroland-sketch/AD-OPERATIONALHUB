@@ -63,9 +63,21 @@ create table if not exists public.operations (
   created_at timestamptz default now()
 );
 
+create table if not exists public.meeting_transcripts (
+  id uuid primary key default gen_random_uuid(),
+  title text not null default 'Untitled transcript',
+  transcript_text text default '',
+  edited_text text default '',
+  created_by text default '',
+  is_final boolean default true,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
 alter table public.meetings enable row level security;
 alter table public.alerts enable row level security;
 alter table public.projects enable row level security;
 alter table public.partners enable row level security;
 alter table public.activities enable row level security;
 alter table public.operations enable row level security;
+alter table public.meeting_transcripts enable row level security;

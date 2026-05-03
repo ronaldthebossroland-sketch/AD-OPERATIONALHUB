@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Loader2,
   Lock,
   MessageCircle,
@@ -23,6 +24,18 @@ const emptyAuthForm = {
   password: "",
 };
 
+function detectRestrictedBrowser() {
+  if (typeof navigator === "undefined") return null;
+  const ua = navigator.userAgent || "";
+  if (/SamsungBrowser/i.test(ua)) return "Samsung Internet";
+  if (/FBAN|FBAV|FB_IAB/i.test(ua)) return "Facebook";
+  if (/Instagram/i.test(ua)) return "Instagram";
+  if (/LinkedInApp/i.test(ua)) return "LinkedIn";
+  if (/TwitterAndroid|TwitteriPhone/i.test(ua)) return "Twitter";
+  if (/MicroMessenger/i.test(ua)) return "WeChat";
+  return null;
+}
+
 export default function LoginPage({ onLogin }) {
   const [authMode, setAuthMode] = useState("login");
   const [authForm, setAuthForm] = useState(emptyAuthForm);
@@ -36,6 +49,7 @@ export default function LoginPage({ onLogin }) {
   const kingsChatClientId = import.meta.env.VITE_KINGSCHAT_CLIENT_ID;
   const isKingsChatConfigured = Boolean(kingsChatClientId);
   const isCreatingAccount = authMode === "signup";
+  const restrictedBrowser = detectRestrictedBrowser();
 
   function updateAuthForm(field, value) {
     setAuthError("");
@@ -172,6 +186,18 @@ export default function LoginPage({ onLogin }) {
             </div>
           </div>
         </div>
+
+        {restrictedBrowser ? (
+          <div className="mt-5 flex items-start gap-3 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <p>
+              <span className="font-black">{restrictedBrowser} browser detected.</span>{" "}
+              Google Sign-In may not work here. For best results, open this page
+              in <span className="font-black">Chrome</span> or your phone&apos;s
+              default browser.
+            </p>
+          </div>
+        ) : null}
 
         <form onSubmit={handlePasswordAuth} className="mt-5 space-y-3">
           <div className="luxury-segmented grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">

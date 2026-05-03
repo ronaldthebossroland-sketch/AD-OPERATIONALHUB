@@ -38,6 +38,7 @@ import {
   updateAlarm,
   updateAlert,
   updateOperation,
+  API_BASE_URL,
 } from "./services/api";
 import {
   registerOAuthDeepLinkHandler,
@@ -392,6 +393,14 @@ export default function ADOperationalHub() {
       mainScrollRef.current.scrollTop = 0;
     }
   }, [activeView]);
+
+  useEffect(() => {
+    const url = `${API_BASE_URL}/health`;
+    const ping = () => fetch(url, { method: "GET" }).catch(() => {});
+    ping();
+    const id = setInterval(ping, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   async function handleLogout() {
     try {
