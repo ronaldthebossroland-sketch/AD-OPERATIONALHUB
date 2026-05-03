@@ -179,25 +179,10 @@ export function getGmailStatus() {
   return requestJson("/api/gmail/status");
 }
 
-export function getGmailEmails() {
-  return requestJson("/api/gmail/emails");
-}
-
-export function getEmailDrafts() {
-  return requestJson("/api/email-drafts");
-}
-
-export function createEmailDraft(draft) {
-  return requestJson("/api/email-drafts", {
+export function getConversationAdvice(conversation) {
+  return requestJson("/api/conversation-advice", {
     method: "POST",
-    body: JSON.stringify(draft),
-  });
-}
-
-export function sendGmailMessage(message) {
-  return requestJson("/api/gmail/send", {
-    method: "POST",
-    body: JSON.stringify(message),
+    body: JSON.stringify({ conversation }),
   });
 }
 

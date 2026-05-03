@@ -5857,6 +5857,34 @@ app.post("/api/ai", requireLogin, async (req, res) => {
   }
 });
 
+app.post("/api/conversation-advice", requireRole(...ADMIN_ROLES), async (req, res) => {
+  const conversation = cleanText(req.body.conversation);
+
+  if (!conversation) {
+    return res.status(400).json({ error: "No conversation provided." });
+  }
+
+  const prompt = `You are an expert executive communication advisor.
+
+Analyse the following conversation and provide:
+1. **Context & Tone** — Brief summary of what is happening and the tone of the exchange.
+2. **Recommended Action** — Should they respond, wait, or take another action? Why?
+3. **Suggested Reply** — A polished, ready-to-send reply they can use or adapt.
+
+Keep your advice concise, strategic, and professional.
+
+Conversation:
+${conversation}`;
+
+  try {
+    const advice = await askAI(prompt);
+    res.json({ ok: true, advice });
+  } catch (error) {
+    console.error("Conversation advice error:", error);
+    res.status(500).json({ error: "Could not analyse the conversation." });
+  }
+});
+
 app.get("/api/email-drafts", requireRole(...ADMIN_ROLES), async (req, res) => {
   try {
     const currentUserEmail = getCurrentUserEmail(req);

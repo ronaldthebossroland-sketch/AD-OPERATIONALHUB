@@ -13,7 +13,7 @@ import AppSplashScreen from "./components/shared/AppSplashScreen";
 import ApprovalCenterView from "./components/pages/ApprovalCenterView";
 import CalendarView from "./components/pages/CalendarView";
 import DashboardView from "./components/pages/DashboardView";
-import EmailsView from "./components/pages/EmailsView";
+import ConversationAdvisorView from "./components/pages/ConversationAdvisorView";
 import MeetingsView from "./components/pages/MeetingsView";
 import OperationsView from "./components/pages/OperationsView";
 import PartnersView from "./components/pages/PartnersView";
@@ -61,7 +61,7 @@ const viewAccess = {
   transcripts: ["Super Admin", "Admin"],
   projects: ["Super Admin", "Admin"],
   partners: ["Super Admin", "Admin"],
-  emails: ["Super Admin", "Admin"],
+  advisor: ["Super Admin", "Admin"],
   operations: ["Super Admin", "Admin"],
   settings: ["Super Admin"],
 };
@@ -723,14 +723,8 @@ export default function ADOperationalHub() {
         return <ProjectsView projects={projects} setProjects={setProjects} />;
       case "partners":
         return <PartnersView partners={partners} setPartners={setPartners} />;
-      case "emails":
-        return (
-          <EmailsView
-            inboxItems={inboxItems}
-            setInboxItems={setInboxItems}
-            refreshKey={gmailRefreshKey}
-          />
-        );
+      case "advisor":
+        return <ConversationAdvisorView />;
       case "operations":
         return (
           <OperationsView

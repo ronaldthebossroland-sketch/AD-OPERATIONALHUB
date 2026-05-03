@@ -4,7 +4,7 @@ import {
   CalendarDays,
   ClipboardList,
   FileText,
-  Mail,
+  MessageSquareQuote,
   Mic,
   Settings,
   ShieldCheck,
@@ -23,6 +23,6 @@ export const navItems = [
   { key: "transcripts", label: "Transcripts", icon: FileText },
   { key: "projects", label: "Projects", icon: ClipboardList },
   { key: "partners", label: "Partners", icon: Users },
-  { key: "emails", label: "Emails", icon: Mail },
+  { key: "advisor", label: "Advisor", icon: MessageSquareQuote },
   { key: "operations", label: "Operations", icon: Building2 },
 ];
