@@ -78,14 +78,24 @@ export const supabaseAuthConfigError = !supabaseAnonKey
   ? "Supabase auth is missing VITE_SUPABASE_ANON_KEY. Add your Supabase anon or publishable key to .env.local for local dev and to Vercel environment variables for production."
   : "";
 
+// Samsung Internet clears localStorage across cross-origin navigations so PKCE
+// code verifiers are lost. Implicit flow returns the token in the URL hash which
+// doesn't require any cross-navigation storage.
+function isSamsungBrowser() {
+  if (typeof navigator === "undefined") return false;
+  return /SamsungBrowser/i.test(navigator.userAgent || "");
+}
+
+export const USES_IMPLICIT_FLOW = isSamsungBrowser();
+
 export const supabase = isSupabaseAuthConfigured
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         autoRefreshToken: true,
         detectSessionInUrl: true,
-        flowType: "pkce",
+        flowType: USES_IMPLICIT_FLOW ? "implicit" : "pkce",
         persistSession: true,
-        storage: cookieStorage,
+        storage: USES_IMPLICIT_FLOW ? undefined : cookieStorage,
       },
     })
   : null;

@@ -14,6 +14,7 @@ import {
   SUPABASE_LOCAL_REDIRECT_URL,
   SUPABASE_NATIVE_REDIRECT_URL,
   SUPABASE_WEB_REDIRECT_URL,
+  USES_IMPLICIT_FLOW,
 } from "./supabaseClient";
 
 const GOOGLE_LOGIN_SCOPES = ["openid", "email", "profile"].join(" ");
@@ -297,10 +298,11 @@ export async function signInWithGoogle() {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      queryParams: {
-        access_type: "offline",
-        prompt: "consent select_account",
-      },
+      // Samsung Internet opens the Gmail app when access_type=offline is present.
+      // Omit those params so only a basic account picker is shown.
+      queryParams: USES_IMPLICIT_FLOW
+        ? {}
+        : { access_type: "offline", prompt: "consent select_account" },
       redirectTo,
       scopes: GOOGLE_LOGIN_SCOPES,
       skipBrowserRedirect: isNative,
