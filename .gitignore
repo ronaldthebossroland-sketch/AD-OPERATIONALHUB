@@ -12,6 +12,12 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.local
+.env.*.local
+!.env.example
+eva-expo-ui/.env
+eva-expo-ui/.env.local
 server/.env
 server/*.db
 server/*.db-*
@@ -29,6 +35,9 @@ server/*.db-*
 
 .vercel
 .expo
+eva-expo-ui/.expo-export-check/
+eva-expo-ui/eva-phone-expo-screenshot*.png
+eva-phone-expo-screenshot*.png
 .claude
 eva-expo-ui/android
 eva-expo-ui/ios

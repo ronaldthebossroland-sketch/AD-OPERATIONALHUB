@@ -740,6 +740,1670 @@ async function deleteTableRow(res, table, id) {
   res.json({ success: true });
 }
 
+async function getDefaultEvaWorkspace() {
+  const { data: existingWorkspace, error: lookupError } = await supabaseAdmin
+    .from("eva_workspaces")
+    .select("id,name")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (lookupError && !isMissingTableError(lookupError)) {
+    throw lookupError;
+  }
+
+  if (existingWorkspace?.id) {
+    return existingWorkspace;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("eva_workspaces")
+    .insert({ name: "Executive Workspace" })
+    .select("id,name")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function getSupabaseUserFromBearer(req) {
+  const auth = req.headers.authorization;
+
+  if (!auth?.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = auth.slice(7);
+  const {
+    data: { user },
+    error,
+  } = await supabaseAdmin.auth.getUser(token);
+
+  if (error || !user?.email) {
+    return null;
+  }
+
+  return user;
+}
+
+async function getOrCreateEvaProfile({ supabaseUser, sessionUser }) {
+  const workspace = await getDefaultEvaWorkspace();
+  const email = normalizeEmail(supabaseUser?.email || sessionUser?.email);
+
+  if (!email) {
+    return null;
+  }
+
+  const authUserId = supabaseUser?.id || null;
+  const query = supabaseAdmin
+    .from("eva_profiles")
+    .select("*")
+    .eq("workspace_id", workspace.id)
+    .eq("email", email)
+    .limit(1);
+
+  const { data: existingProfile, error: lookupError } = await query.maybeSingle();
+
+  if (lookupError && !isMissingTableError(lookupError)) {
+    throw lookupError;
+  }
+
+  if (existingProfile?.id) {
+    return {
+      profile: existingProfile,
+      workspace,
+      authUserId,
+      email,
+    };
+  }
+
+  const role =
+    sessionUser?.role === "Super Admin" || email === normalizeEmail(process.env.SUPER_ADMIN_EMAIL)
+      ? "super_admin"
+      : "admin";
+  const displayName =
+    cleanText(supabaseUser?.user_metadata?.full_name) ||
+    cleanText(supabaseUser?.user_metadata?.name) ||
+    cleanText(sessionUser?.name) ||
+    email;
+  const payload = {
+    user_id: authUserId,
+    workspace_id: workspace.id,
+    display_name: displayName,
+    email,
+    role,
+    timezone: APP_TIME_ZONE,
+  };
+
+  let profilePayload = payload;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data, error } = await supabaseAdmin
+      .from("eva_profiles")
+      .insert(profilePayload)
+      .select("*")
+      .single();
+
+    if (!error) {
+      return {
+        profile: data,
+        workspace,
+        authUserId,
+        email,
+      };
+    }
+
+    const missingColumn = getMissingColumnName(error);
+
+    if (missingColumn === "user_id") {
+      const { user_id: _removed, ...remainingPayload } = profilePayload;
+      void _removed;
+      profilePayload = authUserId
+        ? {
+            ...remainingPayload,
+            auth_user_id: authUserId,
+          }
+        : remainingPayload;
+      continue;
+    }
+
+    if (missingColumn === "auth_user_id") {
+      const { auth_user_id: _removed, ...remainingPayload } = profilePayload;
+      void _removed;
+      profilePayload = remainingPayload;
+      continue;
+    }
+
+    throw error;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("eva_profiles")
+    .insert(profilePayload)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return {
+    profile: data,
+    workspace,
+    authUserId,
+    email,
+  };
+}
+
+async function requireEvaUser(req, res, next) {
+  try {
+    const supabaseUser = await getSupabaseUserFromBearer(req);
+    const sessionUser = req.session?.user || null;
+
+    if (!supabaseUser && !sessionUser?.email) {
+      return res.status(401).json({ error: "Not logged in" });
+    }
+
+    const evaUser = await getOrCreateEvaProfile({ supabaseUser, sessionUser });
+
+    if (!evaUser?.profile?.id) {
+      return res.status(401).json({ error: "EVA profile is not available." });
+    }
+
+    req.eva = evaUser;
+    return next();
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return res.status(503).json({
+        error: "EVA database tables are not ready yet.",
+      });
+    }
+
+    console.error("EVA auth error:", error);
+    return res.status(500).json({ error: "Could not prepare EVA session." });
+  }
+}
+
+function evaWorkspaceQuery(table, req) {
+  return supabaseAdmin
+    .from(table)
+    .select("*")
+    .eq("workspace_id", req.eva.workspace.id);
+}
+
+function evaCreatedBy(req) {
+  return req.eva.authUserId || null;
+}
+
+function cleanJsonObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : fallback;
+}
+
+function cleanJsonArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+async function listEvaRows(req, res, table, key, orderColumn = "created_at") {
+  try {
+    const { data, error } = await evaWorkspaceQuery(table, req).order(orderColumn, {
+      ascending: false,
+    });
+
+    if (error) {
+      if (isMissingTableError(error)) {
+        return res.json({ [key]: [] });
+      }
+
+      throw error;
+    }
+
+    return res.json({ [key]: data || [] });
+  } catch (error) {
+    console.error(`EVA list ${table} error:`, error);
+    return res.status(500).json({ error: `Could not load ${key}.` });
+  }
+}
+
+async function insertEvaRow(req, res, table, key, payload) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from(table)
+      .insert({
+        workspace_id: req.eva.workspace.id,
+        created_by: evaCreatedBy(req),
+        ...payload,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return res.status(201).json({ [key]: data });
+  } catch (error) {
+    console.error(`EVA insert ${table} error:`, error);
+    return res.status(500).json({ error: `Could not save ${key}.` });
+  }
+}
+
+async function updateEvaRow(req, res, table, key, payload) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from(table)
+      .update({
+        ...payload,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", req.params.id)
+      .eq("workspace_id", req.eva.workspace.id)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: `${key} not found.` });
+    }
+
+    return res.json({ [key]: data });
+  } catch (error) {
+    console.error(`EVA update ${table} error:`, error);
+    return res.status(500).json({ error: `Could not update ${key}.` });
+  }
+}
+
+async function deleteEvaRow(req, res, table) {
+  try {
+    const { error } = await supabaseAdmin
+      .from(table)
+      .delete()
+      .eq("id", req.params.id)
+      .eq("workspace_id", req.eva.workspace.id);
+
+    if (error) {
+      throw error;
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error(`EVA delete ${table} error:`, error);
+    return res.status(500).json({ error: "Could not delete EVA record." });
+  }
+}
+
+app.get("/api/eva/bootstrap", requireEvaUser, async (req, res) => {
+  try {
+    const workspaceId = req.eva.workspace.id;
+    const [
+      tasksResult,
+      meetingsResult,
+      remindersResult,
+      documentsResult,
+      notesResult,
+      preferencesResult,
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("eva_tasks")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("eva_meetings")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("eva_reminders")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("eva_documents")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("eva_notes")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("eva_preferences")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("user_id", req.eva.authUserId || "00000000-0000-0000-0000-000000000000")
+        .maybeSingle(),
+    ]);
+
+    for (const result of [
+      tasksResult,
+      meetingsResult,
+      remindersResult,
+      documentsResult,
+      notesResult,
+      preferencesResult,
+    ]) {
+      if (result.error && !isMissingTableError(result.error)) {
+        throw result.error;
+      }
+    }
+
+    return res.json({
+      workspace: req.eva.workspace,
+      profile: req.eva.profile,
+      tasks: tasksResult.data || [],
+      meetings: meetingsResult.data || [],
+      reminders: remindersResult.data || [],
+      documents: documentsResult.data || [],
+      notes: notesResult.data || [],
+      preferences: preferencesResult.data || null,
+    });
+  } catch (error) {
+    console.error("EVA bootstrap error:", error);
+    return res.status(500).json({ error: "Could not load EVA workspace." });
+  }
+});
+
+app.get("/api/eva/tasks", requireEvaUser, (req, res) => {
+  listEvaRows(req, res, "eva_tasks", "tasks");
+});
+
+app.post("/api/eva/tasks", requireEvaUser, (req, res) => {
+  const title = cleanText(req.body.title);
+
+  if (!title) {
+    return res.status(400).json({ error: "Task title is required." });
+  }
+
+  return insertEvaRow(req, res, "eva_tasks", "task", {
+    title,
+    detail: cleanText(req.body.detail),
+    priority: cleanText(req.body.priority, "medium") || "medium",
+    status: cleanText(req.body.status, "todo") || "todo",
+    due_at: req.body.due_at || null,
+    completed_at: req.body.completed_at || null,
+    source_type: cleanText(req.body.source_type),
+    source_id: req.body.source_id || null,
+    metadata: cleanJsonObject(req.body.metadata),
+  });
+});
+
+app.patch("/api/eva/tasks/:id", requireEvaUser, (req, res) => {
+  const payload = {};
+
+  for (const field of ["title", "detail", "priority", "status", "source_type"]) {
+    if (hasBodyField(req.body, field)) {
+      payload[field] = cleanText(req.body[field]);
+    }
+  }
+
+  for (const field of ["due_at", "completed_at", "source_id"]) {
+    if (hasBodyField(req.body, field)) {
+      payload[field] = req.body[field] || null;
+    }
+  }
+
+  if (hasBodyField(req.body, "metadata")) {
+    payload.metadata = cleanJsonObject(req.body.metadata);
+  }
+
+  return updateEvaRow(req, res, "eva_tasks", "task", payload);
+});
+
+app.delete("/api/eva/tasks/:id", requireEvaUser, (req, res) => {
+  deleteEvaRow(req, res, "eva_tasks");
+});
+
+app.get("/api/eva/meetings", requireEvaUser, (req, res) => {
+  listEvaRows(req, res, "eva_meetings", "meetings");
+});
+
+app.post("/api/eva/meetings", requireEvaUser, (req, res) => {
+  const title = cleanText(req.body.title);
+
+  if (!title) {
+    return res.status(400).json({ error: "Meeting title is required." });
+  }
+
+  return insertEvaRow(req, res, "eva_meetings", "meeting", {
+    title,
+    starts_at: req.body.starts_at || null,
+    ends_at: req.body.ends_at || null,
+    timezone: cleanText(req.body.timezone, APP_TIME_ZONE) || APP_TIME_ZONE,
+    location: cleanText(req.body.location),
+    attendees: cleanJsonArray(req.body.attendees),
+    briefing: cleanText(req.body.briefing),
+    status: cleanText(req.body.status, "scheduled") || "scheduled",
+    reminder_minutes_before:
+      Number.parseInt(req.body.reminder_minutes_before, 10) || 15,
+    notes: cleanText(req.body.notes),
+    metadata: cleanJsonObject(req.body.metadata),
+  });
+});
+
+app.patch("/api/eva/meetings/:id", requireEvaUser, (req, res) => {
+  const payload = {};
+
+  for (const field of ["title", "timezone", "location", "briefing", "status", "notes"]) {
+    if (hasBodyField(req.body, field)) {
+      payload[field] = cleanText(req.body[field]);
+    }
+  }
+
+  for (const field of ["starts_at", "ends_at"]) {
+    if (hasBodyField(req.body, field)) {
+      payload[field] = req.body[field] || null;
+    }
+  }
+
+  if (hasBodyField(req.body, "attendees")) {
+    payload.attendees = cleanJsonArray(req.body.attendees);
+  }
+
+  if (hasBodyField(req.body, "reminder_minutes_before")) {
+    payload.reminder_minutes_before =
+      Number.parseInt(req.body.reminder_minutes_before, 10) || 15;
+  }
+
+  if (hasBodyField(req.body, "metadata")) {
+    payload.metadata = cleanJsonObject(req.body.metadata);
+  }
+
+  return updateEvaRow(req, res, "eva_meetings", "meeting", payload);
+});
+
+app.delete("/api/eva/meetings/:id", requireEvaUser, (req, res) => {
+  deleteEvaRow(req, res, "eva_meetings");
+});
+
+app.get("/api/eva/reminders", requireEvaUser, (req, res) => {
+  listEvaRows(req, res, "eva_reminders", "reminders");
+});
+
+app.post("/api/eva/reminders", requireEvaUser, (req, res) => {
+  const title = cleanText(req.body.title);
+
+  if (!title) {
+    return res.status(400).json({ error: "Reminder title is required." });
+  }
+
+  return insertEvaRow(req, res, "eva_reminders", "reminder", {
+    title,
+    remind_at: req.body.remind_at || null,
+    status: cleanText(req.body.status, "pending") || "pending",
+    source_type: cleanText(req.body.source_type),
+    source_id: req.body.source_id || null,
+    snoozed_until: req.body.snoozed_until || null,
+    delivered_at: req.body.delivered_at || null,
+    metadata: cleanJsonObject(req.body.metadata),
+  });
+});
+
+app.patch("/api/eva/reminders/:id", requireEvaUser, (req, res) => {
+  const payload = {};
+
+  for (const field of ["title", "status", "source_type"]) {
+    if (hasBodyField(req.body, field)) {
+      payload[field] = cleanText(req.body[field]);
+    }
+  }
+
+  for (const field of ["remind_at", "source_id", "snoozed_until", "delivered_at"]) {
+    if (hasBodyField(req.body, field)) {
+      payload[field] = req.body[field] || null;
+    }
+  }
+
+  if (hasBodyField(req.body, "metadata")) {
+    payload.metadata = cleanJsonObject(req.body.metadata);
+  }
+
+  return updateEvaRow(req, res, "eva_reminders", "reminder", payload);
+});
+
+app.delete("/api/eva/reminders/:id", requireEvaUser, (req, res) => {
+  deleteEvaRow(req, res, "eva_reminders");
+});
+
+app.get("/api/eva/documents", requireEvaUser, (req, res) => {
+  listEvaRows(req, res, "eva_documents", "documents");
+});
+
+app.post("/api/eva/documents", requireEvaUser, (req, res) => {
+  const title = cleanText(req.body.title);
+
+  if (!title) {
+    return res.status(400).json({ error: "Document title is required." });
+  }
+
+  return insertEvaRow(req, res, "eva_documents", "document", {
+    title,
+    type: cleanText(req.body.type, "note") || "note",
+    content: cleanText(req.body.content),
+    summary: cleanText(req.body.summary),
+    tags: Array.isArray(req.body.tags)
+      ? req.body.tags.map((item) => cleanText(item)).filter(Boolean)
+      : [],
+    metadata: cleanJsonObject(req.body.metadata),
+  });
+});
+
+app.patch("/api/eva/documents/:id", requireEvaUser, (req, res) => {
+  const payload = {};
+
+  for (const field of ["title", "type", "content", "summary"]) {
+    if (hasBodyField(req.body, field)) {
+      payload[field] = cleanText(req.body[field]);
+    }
+  }
+
+  if (hasBodyField(req.body, "tags")) {
+    payload.tags = Array.isArray(req.body.tags)
+      ? req.body.tags.map((item) => cleanText(item)).filter(Boolean)
+      : [];
+  }
+
+  if (hasBodyField(req.body, "metadata")) {
+    payload.metadata = cleanJsonObject(req.body.metadata);
+  }
+
+  return updateEvaRow(req, res, "eva_documents", "document", payload);
+});
+
+app.delete("/api/eva/documents/:id", requireEvaUser, (req, res) => {
+  deleteEvaRow(req, res, "eva_documents");
+});
+
+app.get("/api/eva/notes", requireEvaUser, (req, res) => {
+  listEvaRows(req, res, "eva_notes", "notes");
+});
+
+app.post("/api/eva/notes", requireEvaUser, (req, res) => {
+  return insertEvaRow(req, res, "eva_notes", "note", {
+    title: cleanText(req.body.title),
+    body: cleanText(req.body.body),
+    linked_type: cleanText(req.body.linked_type),
+    linked_id: req.body.linked_id || null,
+    tags: Array.isArray(req.body.tags)
+      ? req.body.tags.map((item) => cleanText(item)).filter(Boolean)
+      : [],
+  });
+});
+
+app.get("/api/eva/preferences", requireEvaUser, async (req, res) => {
+  try {
+    if (!req.eva.authUserId) {
+      return res.json({ preferences: null });
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("eva_preferences")
+      .select("*")
+      .eq("workspace_id", req.eva.workspace.id)
+      .eq("user_id", req.eva.authUserId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return res.json({ preferences: data || null });
+  } catch (error) {
+    console.error("EVA preferences error:", error);
+    return res.status(500).json({ error: "Could not load preferences." });
+  }
+});
+
+app.put("/api/eva/preferences", requireEvaUser, async (req, res) => {
+  try {
+    if (!req.eva.authUserId) {
+      return res.status(400).json({ error: "Supabase auth is required for preferences." });
+    }
+
+    const payload = {
+      user_id: req.eva.authUserId,
+      workspace_id: req.eva.workspace.id,
+      theme: cleanText(req.body.theme, "dark") || "dark",
+      voice_name: cleanText(req.body.voice_name, "soothing") || "soothing",
+      ai_behavior: cleanText(req.body.ai_behavior, "executive") || "executive",
+      notifications_enabled:
+        typeof req.body.notifications_enabled === "boolean"
+          ? req.body.notifications_enabled
+          : true,
+      default_reminder_minutes:
+        Number.parseInt(req.body.default_reminder_minutes, 10) || 15,
+      metadata: cleanJsonObject(req.body.metadata),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from("eva_preferences")
+      .upsert(payload, { onConflict: "user_id,workspace_id" })
+      .select("*")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return res.json({ preferences: data });
+  } catch (error) {
+    console.error("EVA preferences save error:", error);
+    return res.status(500).json({ error: "Could not save preferences." });
+  }
+});
+
+const EVA_MOBILE_ASSISTANT_INTENTS = new Set([
+  "general_question",
+  "create_task",
+  "create_meeting",
+  "reschedule_meeting",
+  "cancel_meeting",
+  "create_reminder",
+  "summarize_notes",
+  "prepare_meeting_briefing",
+  "show_today_schedule",
+  "show_pending_tasks",
+  "create_follow_up_action",
+]);
+
+app.post("/api/eva/assistant", async (req, res) => {
+  try {
+    const userMessage = cleanText(
+      req.body.userMessage || req.body.user_message || req.body.message
+    ).slice(0, 4000);
+
+    if (!userMessage) {
+      return res.status(400).json({ error: "A userMessage is required." });
+    }
+
+    const context = {
+      ...normalizeEvaMobileAssistantRequestContext(req.body),
+      conversationMemory: await loadEvaMobileConversationMemory(userMessage),
+    };
+    const mockResponse = createEvaMobileMockAssistantResponse(userMessage, context);
+    const hasAiKey = Boolean(process.env.GEMINI_API_KEY?.trim());
+
+    if (!hasAiKey) {
+      const response = { ...mockResponse, mode: "mock" };
+      logEvaAssistantDebugResponse(response);
+      return res.json(response);
+    }
+
+    try {
+      const aiText = await askAI(buildEvaMobileAssistantPrompt(userMessage, context));
+      const structured = sanitizeEvaMobileAssistantResponse(
+        parseJsonObject(aiText),
+        mockResponse
+      );
+
+      if (isEvaMobileConversationMemoryQuestion(userMessage.toLowerCase())) {
+        structured.intent = "general_question";
+        structured.action = null;
+      }
+
+      const response = { ...structured, mode: "ai" };
+      logEvaAssistantDebugResponse(response);
+      return res.json(response);
+    } catch (aiError) {
+      console.warn(
+        "EVA mobile AI route used mock fallback:",
+        aiError?.message || aiError
+      );
+      const response = { ...mockResponse, mode: "mock" };
+      logEvaAssistantDebugResponse(response);
+      return res.json(response);
+    }
+  } catch (error) {
+    console.error("EVA mobile assistant route error:", error);
+    return res.status(500).json({
+      error: "EVA could not process that command right now.",
+    });
+  }
+});
+
+app.post(
+  "/api/eva/transcribe",
+  express.raw({
+    type: ["audio/*", "application/octet-stream"],
+    limit: "20mb",
+  }),
+  async (req, res) => {
+    try {
+      if (!deepgram) {
+        return res.status(503).json({
+          error: "Deepgram transcription is not configured on the backend.",
+          provider: "deepgram",
+        });
+      }
+
+      if (!Buffer.isBuffer(req.body) || !req.body.length) {
+        return res.status(400).json({
+          error: "Audio data is required.",
+          provider: "deepgram",
+        });
+      }
+
+      const model = process.env.DEEPGRAM_TRANSCRIBE_MODEL?.trim() || "nova-3";
+      const response = await deepgram.listen.v1.media.transcribeFile(
+        req.body,
+        {
+          model,
+          punctuate: true,
+          smart_format: true,
+        }
+      );
+      const transcript = extractDeepgramTranscript(response);
+
+      if (!transcript) {
+        return res.status(422).json({
+          error: "Deepgram did not return a transcript for that audio.",
+          transcript: "",
+          confidence: extractDeepgramConfidence(response),
+          provider: "deepgram",
+          model,
+        });
+      }
+
+      return res.json({
+        transcript,
+        confidence: extractDeepgramConfidence(response),
+        provider: "deepgram",
+        model,
+      });
+    } catch (error) {
+      console.error("EVA Deepgram transcription error:", {
+        status: error?.status || error?.response?.status || null,
+        message: error?.message || "Transcription failed.",
+      });
+      return res.status(500).json({
+        error: "Could not transcribe that audio right now.",
+        provider: "deepgram",
+      });
+    }
+  }
+);
+
+function buildEvaMobileAssistantPrompt(userMessage, context) {
+  return `
+${currentDateContextForPrompt()}
+
+You are EVA, the Executive Virtual Assistant. Return only a JSON object.
+Do not mention Gmail or email features.
+Adapt your reply to aiBehavior:
+- executive: polished, decision-focused, calm, and practical.
+- concise: shortest useful answer, no extra framing.
+- proactive: answer clearly, then suggest one useful next move or follow-up.
+
+Supported intents:
+${Array.from(EVA_MOBILE_ASSISTANT_INTENTS).join(", ")}
+
+Schema:
+{
+  "reply": "short response to the user",
+  "intent": "one supported intent",
+  "action": null or {
+    "type": "create_task | create_meeting | reschedule_meeting | cancel_meeting | create_reminder | create_follow_up_action",
+    "title": "string",
+    "details": "string",
+    "priority": "low | medium | high",
+    "due_date": "today | tomorrow | next week | ISO date or short label",
+    "meeting_date": "today | tomorrow | ISO date or short label",
+    "start_time": "HH:mm 24-hour time",
+    "duration_minutes": 30,
+    "attendees": ["name or team"],
+    "agenda": "string",
+    "reminder_time": null or "short label"
+  }
+}
+
+Rules:
+- Treat questions like "what meetings do I have today" as show_today_schedule, not create_meeting.
+- Treat questions like "what tasks need attention" as show_pending_tasks, not create_task.
+- Treat briefing requests about meetings as prepare_meeting_briefing, not create_meeting.
+- Create actions only when the user is clearly asking EVA to create, schedule, reschedule, cancel, or remind.
+- If a task request does not include a usable task title, ask one follow-up question and set action to null.
+- If a meeting request does not include a time, ask one follow-up question and set action to null.
+- If a meeting request includes a clear time such as "by 3 PM" or "at 10 AM", return a create_meeting action. If that time has already passed today, set meeting_date to "tomorrow" instead of asking for another time.
+- If a reschedule or cancel request does not identify the meeting clearly enough, ask one follow-up question and set action to null.
+- If a reminder request does not include what to remember, ask one follow-up question and set action to null.
+- If a reminder request does not include a time, it is okay to create a reminder preview with reminder_time null.
+- If the request is general, answer directly with action null.
+- If the user asks what happened yesterday, what you discussed before, or what conversation you had a week back, answer from conversationMemory and keep action null.
+- If conversationMemory is empty for that period, say you do not see stored EVA chat memory for that time yet.
+- Never invent Gmail, inbox, or email actions.
+- Never claim that a record has been saved unless action is not null.
+
+Current EVA context:
+${JSON.stringify(limitEvaMobileAssistantContext(context), null, 2)}
+
+User message:
+${userMessage}
+  `.trim();
+}
+
+function normalizeEvaMobileAssistantRequestContext(body = {}) {
+  const context = cleanJsonObject(body.context, {});
+  const currentTasks = Array.isArray(body.tasks)
+    ? body.tasks
+    : Array.isArray(body.currentTasks)
+      ? body.currentTasks
+      : context.tasks;
+  const currentMeetings = Array.isArray(body.meetings)
+    ? body.meetings
+    : Array.isArray(body.currentMeetings)
+      ? body.currentMeetings
+      : context.meetings;
+  const currentReminders = Array.isArray(body.reminders)
+    ? body.reminders
+    : Array.isArray(body.currentReminders)
+      ? body.currentReminders
+      : context.reminders;
+  const recentChatHistory =
+    body.recentChatHistory ||
+    body.recent_chat_history ||
+    body.messages ||
+    context.recentChatHistory ||
+    context.messages ||
+    [];
+
+  return {
+    ...context,
+    tasks: Array.isArray(currentTasks) ? currentTasks : [],
+    meetings: Array.isArray(currentMeetings) ? currentMeetings : [],
+    reminders: Array.isArray(currentReminders) ? currentReminders : [],
+    documents: Array.isArray(body.documents) ? body.documents : context.documents,
+    recentChatHistory: Array.isArray(recentChatHistory)
+      ? recentChatHistory
+      : [],
+    mode:
+      cleanText(body.appMode || body.app_mode || context.mode) ||
+      "mobile_preview",
+    appStatus:
+      cleanText(body.appStatus || body.app_status || context.appStatus) ||
+      cleanText(context.syncStatus) ||
+      "unknown",
+    syncWarning: cleanText(body.syncWarning || context.syncWarning),
+    aiBehavior: normalizeEvaMobileAiBehavior(body.aiBehavior || context.aiBehavior),
+  };
+}
+
+function limitEvaMobileAssistantContext(context) {
+  return {
+    tasks: Array.isArray(context.tasks) ? context.tasks.slice(0, 8) : [],
+    meetings: Array.isArray(context.meetings) ? context.meetings.slice(0, 8) : [],
+    reminders: Array.isArray(context.reminders) ? context.reminders.slice(0, 8) : [],
+    documents: Array.isArray(context.documents) ? context.documents.slice(0, 5) : [],
+    recentChatHistory: Array.isArray(context.recentChatHistory)
+      ? context.recentChatHistory.slice(-8)
+      : [],
+    conversationMemory: limitEvaMobileConversationMemory(context.conversationMemory),
+    aiBehavior: normalizeEvaMobileAiBehavior(context.aiBehavior),
+    mode: cleanText(context.mode, "mobile_preview"),
+    appStatus: cleanText(context.appStatus, "unknown"),
+    syncWarning: cleanText(context.syncWarning),
+  };
+}
+
+function limitEvaMobileConversationMemory(memory) {
+  if (!memory || typeof memory !== "object") {
+    return null;
+  }
+
+  const messages = Array.isArray(memory.messages)
+    ? memory.messages
+        .slice(-40)
+        .map((message) => ({
+          role:
+            cleanText(message.role, "assistant").toLowerCase() === "user"
+              ? "user"
+              : "assistant",
+          content: cleanText(message.content).slice(0, 600),
+          created_at: cleanText(message.created_at),
+        }))
+        .filter((message) => message.content)
+    : [];
+
+  return {
+    label: cleanText(memory.label),
+    range: cleanText(memory.range),
+    messages,
+  };
+}
+
+async function loadEvaMobileConversationMemory(userMessage) {
+  const window = getEvaMobileConversationMemoryWindow(userMessage);
+
+  if (!window || !supabaseAdmin) {
+    return null;
+  }
+
+  try {
+    let query = supabaseAdmin
+      .from("assistant_messages")
+      .select("role,content,created_at")
+      .eq("app_source", "eva")
+      .order("created_at", { ascending: false })
+      .limit(80);
+
+    if (window.startIso) {
+      query = query.gte("created_at", window.startIso);
+    }
+
+    if (window.endIso) {
+      query = query.lt("created_at", window.endIso);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      if (isMissingTableError(error)) {
+        return { label: window.label, range: window.range, messages: [] };
+      }
+
+      throw error;
+    }
+
+    const messages = (data || [])
+      .slice()
+      .reverse()
+      .map((row) => ({
+        role: row.role === "user" ? "user" : "assistant",
+        content: cleanText(row.content).slice(0, 600),
+        created_at: row.created_at || "",
+      }))
+      .filter((message) => message.content);
+
+    return {
+      label: window.label,
+      range: window.range,
+      messages,
+    };
+  } catch (error) {
+    console.warn("EVA assistant memory lookup unavailable.", error?.message || error);
+    return { label: window.label, range: window.range, messages: [] };
+  }
+}
+
+function getEvaMobileConversationMemoryWindow(userMessage) {
+  const text = cleanText(userMessage).toLowerCase();
+
+  if (!isEvaMobileConversationMemoryQuestion(text)) {
+    return null;
+  }
+
+  const today = startOfEvaLocalDay();
+
+  if (/\byesterday\b/.test(text)) {
+    const start = addDays(today, -1);
+    return {
+      label: "yesterday",
+      range: `${start.toISOString()} to ${today.toISOString()}`,
+      startIso: start.toISOString(),
+      endIso: today.toISOString(),
+    };
+  }
+
+  if (/\b(a|one)\s+week\s+(back|ago)\b|\bweek\s+back\b/.test(text)) {
+    const start = addDays(today, -7);
+    const end = addDays(today, -6);
+    return {
+      label: "a week back",
+      range: `${start.toISOString()} to ${end.toISOString()}`,
+      startIso: start.toISOString(),
+      endIso: end.toISOString(),
+    };
+  }
+
+  if (/\blast\s+week\b|\bpast\s+week\b|\bprevious\s+week\b|\blast\s+7\s+days\b/.test(text)) {
+    const start = addDays(today, -7);
+    return {
+      label: "the last week",
+      range: `${start.toISOString()} to ${new Date().toISOString()}`,
+      startIso: start.toISOString(),
+      endIso: null,
+    };
+  }
+
+  const start = addDays(today, -14);
+  return {
+    label: "recent EVA conversation history",
+    range: `${start.toISOString()} to ${new Date().toISOString()}`,
+    startIso: start.toISOString(),
+    endIso: null,
+  };
+}
+
+function isEvaMobileConversationMemoryQuestion(text) {
+  return (
+    /\b(yesterday|last week|past week|previous week|week back|week ago|last 7 days)\b/.test(text) ||
+    (
+      /\b(conversation|chat|talked|discussed|said|happened|remember|recall)\b/.test(text) &&
+      /\b(what|which|when|yesterday|before|earlier|previous|last|week)\b/.test(text)
+    )
+  );
+}
+
+function startOfEvaLocalDay(date = new Date()) {
+  const day = new Date(date);
+  day.setHours(0, 0, 0, 0);
+  return day;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function sanitizeEvaMobileAssistantResponse(value, fallback) {
+  const reply = cleanText(value?.reply, fallback.reply);
+  const normalizedIntent = normalizeEvaMobileAssistantIntent(value?.intent);
+  const intent = EVA_MOBILE_ASSISTANT_INTENTS.has(normalizedIntent)
+    ? normalizedIntent
+    : fallback.intent;
+  const hasActionField =
+    value &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "action");
+  const action = hasActionField
+    ? sanitizeEvaMobileAssistantAction(value.action, null)
+    : fallback.action;
+
+  return {
+    reply,
+    intent,
+    action,
+  };
+}
+
+function sanitizeEvaMobileAssistantAction(action, fallbackAction = null) {
+  if (!action || typeof action !== "object") {
+    return fallbackAction;
+  }
+
+  const type = normalizeEvaMobileAssistantActionType(action.type);
+  const allowedTypes = [
+    "create_task",
+    "create_meeting",
+    "reschedule_meeting",
+    "cancel_meeting",
+    "create_reminder",
+    "create_follow_up_action",
+  ];
+
+  if (!allowedTypes.includes(type)) {
+    return fallbackAction;
+  }
+
+  return {
+    type,
+    title: cleanText(action.title || action.meeting_title),
+    details: cleanText(action.details),
+    priority: normalizeEvaMobilePriority(action.priority),
+    due_date: cleanText(action.due_date),
+    meeting_date: cleanText(action.meeting_date || action.meetingDate || action.date),
+    start_time: cleanText(action.start_time || action.startTime || action.time),
+    duration_minutes:
+      Number.parseInt(action.duration_minutes || action.durationMinutes, 10) > 0
+        ? Number.parseInt(action.duration_minutes || action.durationMinutes, 10)
+        : 30,
+    attendees: normalizeEvaMobileAttendees(
+      action.attendees || action.participants || action.invitees
+    ),
+    agenda: cleanText(action.agenda),
+    reminder_time:
+      action.reminder_time === null ? null : cleanText(action.reminder_time),
+  };
+}
+
+function normalizeEvaMobileAssistantIntent(value) {
+  const intent = cleanText(value).toLowerCase();
+  const aliases = {
+    schedule_meeting: "create_meeting",
+    scheduled_meeting: "create_meeting",
+    book_meeting: "create_meeting",
+    add_meeting: "create_meeting",
+    create_calendar_event: "create_meeting",
+    schedule_calendar_event: "create_meeting",
+    create_appointment: "create_meeting",
+    schedule_appointment: "create_meeting",
+    add_task: "create_task",
+    add_reminder: "create_reminder",
+    set_reminder: "create_reminder",
+    schedule_reminder: "create_reminder",
+  };
+
+  return aliases[intent] || intent;
+}
+
+function normalizeEvaMobileAssistantActionType(value) {
+  return normalizeEvaMobileAssistantIntent(value);
+}
+
+function logEvaAssistantDebugResponse(response) {
+  console.log("[EVA assistant debug] response", {
+    mode: response?.mode,
+    intent: response?.intent,
+    actionType: response?.action?.type || null,
+    actionTitle: response?.action?.title || null,
+    meetingDate: response?.action?.meeting_date || null,
+    startTime: response?.action?.start_time || null,
+    durationMinutes: response?.action?.duration_minutes || null,
+    attendees: response?.action?.attendees || null,
+  });
+}
+
+function createEvaMobileMockAssistantResponse(userMessage, context = {}) {
+  const text = cleanText(userMessage);
+  const lower = text.toLowerCase();
+  const aiBehavior = normalizeEvaMobileAiBehavior(context.aiBehavior);
+  const memoryMessages = Array.isArray(context.conversationMemory?.messages)
+    ? context.conversationMemory.messages
+    : [];
+
+  if (isEvaMobileConversationMemoryQuestion(lower)) {
+    const label = cleanText(context.conversationMemory?.label, "that time");
+    const reply = memoryMessages.length
+      ? `I found ${memoryMessages.length} stored EVA chat message${memoryMessages.length === 1 ? "" : "s"} from ${label}. The latest was: ${memoryMessages[memoryMessages.length - 1].content}`
+      : `I do not see stored EVA chat memory for ${label} yet.`;
+
+    return {
+      reply: formatEvaMobileBehaviorReply(reply, aiBehavior, "general_question"),
+      intent: "general_question",
+      action: null,
+    };
+  }
+
+  if (/\b(remind|reminder|alarm)\b/.test(lower)) {
+    const title = extractEvaMobileReminderTitle(text);
+    const reminderTime = extractEvaMobileReminderTime(text);
+
+    if (!title) {
+      return {
+        reply: formatEvaMobileBehaviorReply(
+          "Sure. What should I remind you about?",
+          aiBehavior,
+          "create_reminder"
+        ),
+        intent: "create_reminder",
+        action: null,
+      };
+    }
+
+    return {
+      reply: formatEvaMobileBehaviorReply(
+        `Done. I set a reminder to ${title}.`,
+        aiBehavior,
+        "create_reminder"
+      ),
+      intent: "create_reminder",
+      action: {
+        type: "create_reminder",
+        title: title.charAt(0).toUpperCase() + title.slice(1),
+        details: "",
+        priority: "medium",
+        due_date: "",
+        meeting_date: "",
+        start_time: "",
+        duration_minutes: 30,
+        attendees: [],
+        agenda: "",
+        reminder_time: reminderTime,
+      },
+    };
+  }
+
+  if (isEvaMobileScheduleQuestion(lower)) {
+    const meetings = Array.isArray(context.meetings) ? context.meetings : [];
+    const reply = meetings.length
+      ? `You have ${meetings.length} meeting${meetings.length === 1 ? "" : "s"} in EVA. The next one is ${meetings[0].title || "your next meeting"}.`
+      : "I do not see a meeting scheduled in EVA yet.";
+    return {
+      reply: formatEvaMobileBehaviorReply(reply, aiBehavior, "show_today_schedule"),
+      intent: "show_today_schedule",
+      action: null,
+    };
+  }
+
+  if (isEvaMobilePendingTasksQuestion(lower)) {
+    const tasks = Array.isArray(context.tasks) ? context.tasks : [];
+    const activeTasks = tasks.filter((task) => {
+      const status = cleanText(task.status).toLowerCase();
+      return status !== "done" && status !== "completed";
+    });
+    const reply = activeTasks.length
+      ? `${activeTasks.length} task${activeTasks.length === 1 ? "" : "s"} need attention. Start with ${activeTasks[0].title || "the first task"}.`
+      : "Your EVA task list is clear right now.";
+    return {
+      reply: formatEvaMobileBehaviorReply(reply, aiBehavior, "show_pending_tasks"),
+      intent: "show_pending_tasks",
+      action: null,
+    };
+  }
+
+  if (/\b(brief|briefing|prepare my next move|next move)\b/.test(lower)) {
+    const meetings = Array.isArray(context.meetings) ? context.meetings : [];
+    const nextMeeting = meetings[0];
+    const reply = nextMeeting
+      ? `Briefing focus for ${nextMeeting.title || "your next meeting"}: confirm the outcome, decisions needed, open risks, and follow-up owner.`
+      : "I do not see a next meeting yet. Add the meeting first and I will prepare a briefing around it.";
+    return {
+      reply: formatEvaMobileBehaviorReply(
+        reply,
+        aiBehavior,
+        "prepare_meeting_briefing"
+      ),
+      intent: "prepare_meeting_briefing",
+      action: null,
+    };
+  }
+
+  if (/\b(reschedule|move|shift)\b/.test(lower) && /\bmeeting|calendar|appointment\b/.test(lower)) {
+    const time = extractEvaMobileTime24(text);
+    if (!time) {
+      return {
+        reply: formatEvaMobileBehaviorReply(
+          "Sure. What time should I move the meeting to?",
+          aiBehavior,
+          "reschedule_meeting"
+        ),
+        intent: "reschedule_meeting",
+        action: null,
+      };
+    }
+
+    return {
+      reply: formatEvaMobileBehaviorReply(
+        `Done. I can reschedule the meeting to ${formatEvaMobileDisplayTime(time)}.`,
+        aiBehavior,
+        "reschedule_meeting"
+      ),
+      intent: "reschedule_meeting",
+      action: {
+        type: "reschedule_meeting",
+        title: "Meeting",
+        details: "",
+        priority: "medium",
+        due_date: "",
+        meeting_date: extractEvaMobileDateLabel(text),
+        start_time: time,
+        duration_minutes: 30,
+        attendees: [],
+        agenda: "",
+        reminder_time: null,
+      },
+    };
+  }
+
+  if (/\b(cancel|delete)\b/.test(lower) && /\bmeeting|calendar|appointment\b/.test(lower)) {
+    return {
+      reply: formatEvaMobileBehaviorReply(
+        "I can help cancel that meeting, but I need the meeting title or time first.",
+        aiBehavior,
+        "cancel_meeting"
+      ),
+      intent: "cancel_meeting",
+      action: null,
+    };
+  }
+
+  if (/\b(meeting|schedule|calendar|appointment)\b/.test(lower)) {
+    const attendee = extractEvaMobileAttendee(text);
+    const time = extractEvaMobileTime24(text);
+
+    if (!time) {
+      return {
+        reply: formatEvaMobileBehaviorReply(
+          `Sure. What time should I schedule the meeting${attendee ? ` with ${attendee}` : ""}?`,
+          aiBehavior,
+          "create_meeting"
+        ),
+        intent: "create_meeting",
+        action: null,
+      };
+    }
+
+    const title = attendee ? `Meeting with ${attendee}` : "Executive meeting";
+
+    return {
+      reply: formatEvaMobileBehaviorReply(
+        `Done. I created ${title} for ${formatEvaMobileDisplayTime(time)}.`,
+        aiBehavior,
+        "create_meeting"
+      ),
+      intent: "create_meeting",
+      action: {
+        type: "create_meeting",
+        title,
+        details: "",
+        priority: "medium",
+        due_date: "",
+        meeting_date: extractEvaMobileDateLabel(text),
+        start_time: time,
+        duration_minutes: 30,
+        attendees: attendee ? [attendee] : [],
+        agenda: "",
+        reminder_time: null,
+      },
+    };
+  }
+
+  if (/\b(task|todo|to-do|action item|follow[-\s]?up|follow up)\b/.test(lower)) {
+    const title = extractEvaMobileTaskTitle(text);
+    if (!title) {
+      return {
+        reply: formatEvaMobileBehaviorReply(
+          "Sure. What task should I create?",
+          aiBehavior,
+          "create_task"
+        ),
+        intent: "create_task",
+        action: null,
+      };
+    }
+    const priority = normalizeEvaMobilePriority(
+      /\b(high|urgent|critical)\b/.test(lower)
+        ? "high"
+        : /\b(low|minor)\b/.test(lower)
+          ? "low"
+          : "medium"
+    );
+
+    return {
+      reply: formatEvaMobileBehaviorReply(
+        `Done. I created the task "${title}".`,
+        aiBehavior,
+        "create_task"
+      ),
+      intent: /\bfollow[-\s]?up|follow up\b/.test(lower)
+        ? "create_follow_up_action"
+        : "create_task",
+      action: {
+        type: /\bfollow[-\s]?up|follow up\b/.test(lower)
+          ? "create_follow_up_action"
+          : "create_task",
+        title,
+        details: "",
+        priority,
+        due_date: extractEvaMobileDateLabel(text),
+        meeting_date: "",
+        start_time: "",
+        duration_minutes: 30,
+        attendees: [],
+        agenda: "",
+        reminder_time: null,
+      },
+    };
+  }
+
+  if (/\b(summarize|summary|notes|knowledge|document)\b/.test(lower)) {
+    return {
+      reply: formatEvaMobileBehaviorReply(
+        "Share or select the note you want summarized, and I will turn it into decisions, risks, and action items.",
+        aiBehavior,
+        "summarize_notes"
+      ),
+      intent: "summarize_notes",
+      action: null,
+    };
+  }
+
+  return {
+    reply: formatEvaMobileBehaviorReply(
+      "Here is the answer: EVA can help with tasks, meetings, reminders, notes, briefings, and daily executive workflow.",
+      aiBehavior,
+      "general_question"
+    ),
+    intent: "general_question",
+    action: null,
+  };
+}
+
+function extractEvaMobileTaskTitle(text) {
+  const cleaned = cleanText(text)
+    .replace(/^(please\s+)?(create|add|make|set)\s+(a\s+)?(task|todo|to-do|action item)\s*(for|to)?\s*/i, "")
+    .replace(/\b(today|tomorrow|next week)\b/gi, "")
+    .replace(/\b(?:by|due|on)\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\b/gi, "")
+    .trim();
+
+  return cleaned ? capitalizeEvaMobileTitle(cleaned) : "";
+}
+
+function isEvaMobileScheduleQuestion(lower) {
+  return (
+    /\b(meetings?|schedule|calendar|appointments?)\b/.test(lower) &&
+    /\b(what|which|show|list|today|do i have|have i got)\b/.test(lower) &&
+    !/\b(create|add|book|set up|schedule a|schedule the)\b/.test(lower)
+  );
+}
+
+function isEvaMobilePendingTasksQuestion(lower) {
+  return (
+    /\b(tasks?|todos?|to-dos?|action items?|follow[-\s]?ups?)\b/.test(lower) &&
+    /\b(what|which|show|list|pending|open|blocked|overdue|attention)\b/.test(lower) &&
+    !/\b(create|add|make|set)\b/.test(lower)
+  );
+}
+
+function extractEvaMobileReminderTitle(text) {
+  const cleaned = cleanText(text)
+    .replace(/^(please\s+)?remind\s+me\s+(to|about)\s*/i, "")
+    .replace(/^(please\s+)?(set|create|add)\s+(a\s+)?(reminder|alarm)\s*(for|to)?\s*/i, "")
+    .trim();
+
+  return cleaned;
+}
+
+function extractEvaMobileAttendee(text) {
+  const match = cleanText(text).match(/\bwith\s+(.+?)(?:\s+on|\s+at|\s+by|$)/i);
+  return match?.[1]?.trim() || "";
+}
+
+function extractEvaMobileDateLabel(text) {
+  const lower = cleanText(text).toLowerCase();
+  if (/\btomorrow\b/.test(lower)) return "tomorrow";
+  if (/\bnext week\b/.test(lower)) return "next week";
+  const dayMatch = lower.match(/\b(?:on|by|due)\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b/);
+  if (dayMatch) return `day ${dayMatch[1]}`;
+  return "today";
+}
+
+function extractEvaMobileReminderTime(text) {
+  const time = extractEvaMobileTime24(text);
+  return time || null;
+}
+
+function extractEvaMobileTime24(text) {
+  const match =
+    cleanText(text).match(/\b(?:at|by|for)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b/i) ||
+    cleanText(text).match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b/i);
+
+  if (!match) return "";
+
+  let hour = Number.parseInt(match[1], 10);
+  const minutes = match[2] || "00";
+  const period = cleanText(match[3]).replace(/\./g, "").toLowerCase();
+
+  if (!Number.isFinite(hour) || hour < 1 || hour > 12) return "";
+  if (period === "pm" && hour !== 12) hour += 12;
+  if (period === "am" && hour === 12) hour = 0;
+
+  return `${String(hour).padStart(2, "0")}:${minutes}`;
+}
+
+function formatEvaMobileDisplayTime(time) {
+  const [hourText, minuteText = "00"] = cleanText(time).split(":");
+  const hour = Number.parseInt(hourText, 10);
+  if (!Number.isFinite(hour)) return time;
+
+  const period = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:${minuteText.padStart(2, "0")} ${period}`;
+}
+
+function normalizeEvaMobileAiBehavior(value) {
+  const behavior = cleanText(value, "executive").toLowerCase();
+  if (behavior === "concise" || behavior === "proactive") {
+    return behavior;
+  }
+  return "executive";
+}
+
+function formatEvaMobileBehaviorReply(reply, behavior, actionType) {
+  const text = cleanText(reply, "Done.");
+  const normalized = normalizeEvaMobileAiBehavior(behavior);
+
+  if (normalized === "concise") {
+    const sentences = text.match(/[^.!?]+[.!?]?/g)?.map((item) => item.trim()) || [];
+    const firstSentence = sentences[0] || text;
+    return /^(done|sure|okay|ok)\.?$/i.test(firstSentence) && sentences[1]
+      ? `${firstSentence} ${sentences[1]}`
+      : firstSentence;
+  }
+
+  if (normalized !== "proactive") {
+    return text;
+  }
+
+  const suggestion = evaMobileProactiveSuggestion(actionType);
+  return suggestion && !text.includes("Recommended next move")
+    ? `${text}\n\nRecommended next move: ${suggestion}`
+    : text;
+}
+
+function evaMobileProactiveSuggestion(actionType) {
+  switch (actionType) {
+    case "create_task":
+    case "create_follow_up_action":
+      return "assign an owner and add a reminder.";
+    case "create_meeting":
+      return "add a short agenda and confirm the follow-up owner.";
+    case "create_reminder":
+      return "link this reminder to a task or meeting if it belongs to a larger outcome.";
+    case "prepare_meeting_briefing":
+      return "review risks, decisions needed, and the one outcome you want.";
+    case "show_today_schedule":
+      return "protect one preparation block before the highest-stakes meeting.";
+    case "show_pending_tasks":
+      return "clear or delegate the highest-priority item first.";
+    default:
+      return "";
+  }
+}
+
+function normalizeEvaMobilePriority(value) {
+  const priority = cleanText(value, "medium").toLowerCase();
+  if (priority === "high" || priority === "urgent" || priority === "critical") return "high";
+  if (priority === "low" || priority === "minor") return "low";
+  return "medium";
+}
+
+function normalizeEvaMobileAttendees(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => cleanText(item)).filter(Boolean);
+  }
+
+  return cleanText(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function capitalizeEvaMobileTitle(value) {
+  const text = cleanText(value);
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
+app.post("/api/eva/assistant/chat", requireEvaUser, async (req, res) => {
+  try {
+    const messages = normalizeAssistantMessages(req.body.messages);
+    const lastUserMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "user");
+
+    if (!lastUserMessage) {
+      return res.status(400).json({
+        error: "At least one user message is required.",
+      });
+    }
+
+    let threadId = req.body.thread_id || null;
+
+    if (!threadId) {
+      const { data: thread, error: threadError } = await supabaseAdmin
+        .from("eva_assistant_threads")
+        .insert({
+          workspace_id: req.eva.workspace.id,
+          created_by: evaCreatedBy(req),
+          title: lastUserMessage.content.slice(0, 80) || "EVA conversation",
+        })
+        .select("*")
+        .single();
+
+      if (threadError) {
+        throw threadError;
+      }
+
+      threadId = thread.id;
+    }
+
+    const reply = await askAI(`
+You are EVA, the Executive Virtual Assistant.
+You are calm, direct, premium, and practical.
+Use the EVA product scope: tasks, meetings, reminders, documents, transcripts,
+notes, preferences, and executive daily workflow.
+Do not mention Gmail or email features.
+
+Return a concise natural-language reply only.
+
+Conversation:
+${messages.map((message) => `${message.role}: ${message.content}`).join("\n")}
+    `);
+    const intent = inferAssistantIntent(lastUserMessage.content);
+    const now = new Date().toISOString();
+
+    await supabaseAdmin.from("eva_assistant_messages").insert([
+      {
+        thread_id: threadId,
+        workspace_id: req.eva.workspace.id,
+        role: "user",
+        content: lastUserMessage.content,
+        intent,
+        actions: [],
+        created_at: now,
+      },
+      {
+        thread_id: threadId,
+        workspace_id: req.eva.workspace.id,
+        role: "assistant",
+        content: reply,
+        intent,
+        actions: [],
+        created_at: now,
+      },
+    ]);
+
+    return res.json({
+      thread_id: threadId,
+      reply,
+      intent,
+      actions: [],
+    });
+  } catch (error) {
+    console.error("EVA assistant chat error:", error);
+    return res.status(500).json({
+      error: "EVA could not respond right now.",
+    });
+  }
+});
+
 function categorizeEmailRecord(email) {
   const text = [email.from, email.subject, email.snippet]
     .join(" ")
