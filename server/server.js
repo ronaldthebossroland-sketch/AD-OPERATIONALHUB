@@ -127,6 +127,18 @@ function healthStatus() {
   return {
     status: "ok",
     message: "Executive Virtual AI Assistant API is running",
+    services: {
+      aiProvider: "gemini",
+      aiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+      aiModel:
+        process.env.AI_MODEL || process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      deepgramConfigured: Boolean(process.env.DEEPGRAM_API_KEY?.trim()),
+      deepgramModel: process.env.DEEPGRAM_TRANSCRIBE_MODEL || "nova-3",
+      supabaseConfigured: Boolean(
+        process.env.SUPABASE_URL?.trim() &&
+          process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+      ),
+    },
   };
 }
 
