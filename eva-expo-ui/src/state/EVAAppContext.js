@@ -23,6 +23,7 @@ import {
   createSupabaseMeeting,
   createSupabaseReminder,
   createSupabaseTask,
+  deleteSupabaseMeeting,
   isEvaSupabaseConfigured,
   loadEvaSupabaseData,
   saveSupabaseProfile,
@@ -40,9 +41,10 @@ import {
   requestCalendarPermissions,
   requestNotificationPermissions,
 } from "../lib/devicePermissions";
-import { createDeviceCalendarEvent } from "../lib/deviceCalendar";
+import { createDeviceCalendarEvent, deleteDeviceCalendarEvent, updateDeviceCalendarEvent } from "../lib/deviceCalendar";
 import {
   addNotificationResponseListener,
+  cancelScheduledNotification,
   ensureEvaReminderChannel,
   scheduleMeetingReminder,
   scheduleReminderNotification,
@@ -1180,6 +1182,23 @@ export function EVAAppProvider({ children }) {
     return patch;
   }
 
+  function deleteMeeting(id) {
+    const target = meetings.find((m) => m.id === id);
+    setMeetings((current) => current.filter((meeting) => meeting.id !== id));
+
+    if (target?.notificationId) {
+      cancelScheduledNotification(target.notificationId).catch(() => {});
+    }
+    if (target?.deviceCalendarEventId) {
+      deleteDeviceCalendarEvent(target).catch(() => {});
+    }
+    if (remoteEnabled && currentUser?.id && !isLocalRecordId(id, "meeting")) {
+      deleteSupabaseMeeting(id, currentUser.id).catch((error) => {
+        console.warn("EVA Supabase meeting delete failed.", error?.message || error);
+      });
+    }
+  }
+
   function rescheduleMeeting(id, input = {}) {
     const existing = meetings.find((meeting) => meeting.id === id);
     const updatedMeeting = existing
@@ -1195,6 +1214,34 @@ export function EVAAppProvider({ children }) {
         meeting.id === id && updatedMeeting ? updatedMeeting : meeting
       )
     );
+
+    if (updatedMeeting) {
+      if (existing.notificationId && notificationEnabled) {
+        cancelScheduledNotification(existing.notificationId)
+          .then(() => scheduleMeetingReminder(updatedMeeting))
+          .then((result) => {
+            if (result.ok) {
+              const notificationPatch = {
+                notificationId: result.notification_id || "",
+                reminderScheduled: Boolean(result.reminder_scheduled),
+                reminderStatus: result.reminder_status || "scheduled",
+              };
+              patchRecord(setMeetings, id, notificationPatch);
+              if (!isLocalRecordId(id, "meeting")) {
+                syncMutation(
+                  "meeting_notification_patch",
+                  () => updateSupabaseMeeting(id, notificationPatch, currentUser.id),
+                  () => {}
+                );
+              }
+            }
+          })
+          .catch(() => {});
+      }
+      if (existing.deviceCalendarEventId) {
+        updateDeviceCalendarEvent(updatedMeeting).catch(() => {});
+      }
+    }
 
     if (updatedMeeting && !isLocalRecordId(id, "meeting")) {
       syncMutation(
@@ -1505,8 +1552,9 @@ export function EVAAppProvider({ children }) {
 
       const durationMinutes =
         action.duration_minutes || action.durationMinutes || action.duration || 30;
+      const rawTitle = String(action.title || action.meeting_title || "").trim();
       const meeting = await addMeeting({
-        title: action.title || action.meeting_title || extractMeetingTitle(content),
+        title: isGenericMeetingTitle(rawTitle) ? (extractMeetingTitle(content) || "Meeting") : rawTitle,
         date: formatAssistantActionDate(
           action.meeting_date || action.meetingDate || action.date || action.day
         ),
@@ -1715,6 +1763,7 @@ export function EVAAppProvider({ children }) {
     updateTaskStatus,
     addMeeting,
     rescheduleMeeting,
+    deleteMeeting,
     addDocument,
     addTranscript,
     addReminder,
@@ -2218,11 +2267,28 @@ function extractTaskTitle(text) {
 }
 
 function extractMeetingTitle(text) {
-  const withMatch = text.match(/\bmeeting\s+with\s+(.+?)(?:\s+on|\s+at|\s+by|$)/i);
+  const withMatch = text.match(/\bmeeting\s+with\s+(.+?)(?:\s+on|\s+at|\s+by|\s+for|,|$)/i);
   if (withMatch) {
-    return `Meeting with ${withMatch[1].trim()}`;
+    const name = stripMeetingDateWords(withMatch[1].trim());
+    if (name) return `Meeting with ${capitalizeTitle(name)}`;
   }
-  return "Executive meeting";
+  const scheduleWith = text.match(/\b(?:schedule|set up|book|create)\s+.*?\bwith\s+(.+?)(?:\s+on|\s+at|\s+by|,|$)/i);
+  if (scheduleWith) {
+    const name = stripMeetingDateWords(scheduleWith[1].trim());
+    if (name) return `Meeting with ${capitalizeTitle(name)}`;
+  }
+  return "";
+}
+
+function stripMeetingDateWords(name) {
+  return name
+    .replace(/\b(today|tomorrow|next\s+week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isGenericMeetingTitle(title) {
+  return !title || /^(executive|team|new|a|the)\s+meeting$/i.test(title.trim());
 }
 
 function extractMeetingDate(text) {
@@ -2243,7 +2309,8 @@ function extractMeetingDate(text) {
 
 function extractAttendees(text) {
   const match = text.match(/\bwith\s+(.+?)(?:\s+on|\s+at|\s+by|$)/i);
-  return match?.[1]?.trim() || "Team";
+  const name = match?.[1]?.trim();
+  return name ? (stripMeetingDateWords(name) || "Team") : "Team";
 }
 
 function extractReminderTitle(text) {

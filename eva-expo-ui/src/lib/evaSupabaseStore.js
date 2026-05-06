@@ -157,6 +157,19 @@ export async function updateSupabaseMeeting(id, patch, userId) {
   return mapSupabaseMeeting(data);
 }
 
+export async function deleteSupabaseMeeting(id, userId) {
+  ensureSupabase();
+  const activeUserId = requireUserId(userId);
+  const { error } = await supabase
+    .from("meetings")
+    .delete()
+    .eq("id", id)
+    .eq("app_source", APP_SOURCE)
+    .eq("user_id", activeUserId);
+
+  throwIfError(error);
+}
+
 export async function createSupabaseReminder(reminder, userId) {
   ensureSupabase();
   const activeUserId = requireUserId(userId);

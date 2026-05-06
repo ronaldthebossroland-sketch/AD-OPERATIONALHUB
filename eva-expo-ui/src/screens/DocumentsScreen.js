@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useAudioRecorder } from "expo-audio";
+import { useAudioRecorder, setAudioModeAsync } from "expo-audio";
 import { GlowCard } from "../components/GlowCard";
 import { ScreenHeader } from "../components/ScreenHeader";
 import { SectionTitle } from "../components/SectionTitle";
@@ -18,10 +18,8 @@ import { useEVAApp } from "../state/EVAAppContext";
 import { requestMicrophonePermission } from "../lib/devicePermissions";
 import { transcribeEvaAudio } from "../lib/evaApi";
 import {
-  cancelRecording,
-  startRecording,
-  stopRecording,
   VOICE_RECORDING_OPTIONS,
+  getRecordingMimeType,
 } from "../lib/voiceRecorder";
 
 const SEGMENT_MS = 12_000;
@@ -41,15 +39,17 @@ export function DocumentsScreen() {
   const [segmentStatus, setSegmentStatus] = useState("");
   const transcribingRef = useRef(false);
   const segmentTimerRef = useRef(null);
+  const segmentResolveRef = useRef(null);
   const audioRecorder = useAudioRecorder(VOICE_RECORDING_OPTIONS);
 
   useEffect(() => {
     return () => {
       transcribingRef.current = false;
-      if (segmentTimerRef.current) {
-        clearTimeout(segmentTimerRef.current);
-      }
-      cancelRecording(audioRecorder).catch(() => {});
+      if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
+      segmentResolveRef.current?.();
+      segmentResolveRef.current = null;
+      try { if (audioRecorder.isRecording) audioRecorder.stop().catch(() => {}); } catch { /* noop */ }
+      setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
     };
   }, [audioRecorder]);
 
@@ -61,47 +61,53 @@ export function DocumentsScreen() {
     }
     setIsTranscribing(false);
     setSegmentStatus("");
-    await cancelRecording(audioRecorder).catch(() => {});
+    segmentResolveRef.current?.();
+    segmentResolveRef.current = null;
+    try { if (audioRecorder.isRecording) await audioRecorder.stop(); } catch { /* noop */ }
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
     setTranscriptStatus((s) => (s === "listening" ? "editing" : s));
   }, [audioRecorder]);
 
-  function runSegment() {
+  async function runSegment() {
     if (!transcribingRef.current) return;
-
-    setSegmentStatus("recording");
-
-    startRecording(audioRecorder)
-      .then(() => {
-        return new Promise((resolve) => {
-          segmentTimerRef.current = setTimeout(resolve, SEGMENT_MS);
-        });
-      })
-      .then(() => {
-        segmentTimerRef.current = null;
-        if (!transcribingRef.current) {
-          return cancelRecording(audioRecorder).catch(() => {});
-        }
-        setSegmentStatus("processing");
-        return stopRecording(audioRecorder).then((recording) => {
-          if (!recording.uri || !transcribingRef.current) return;
-          return transcribeEvaAudio(recording.uri, { mimeType: recording.mimeType }).then((data) => {
-            const text = String(data?.transcript || "").trim();
-            if (text && transcribingRef.current) {
-              setLiveTranscript((current) => (current ? `${current} ${text}` : text));
-              setTranscriptStatus("listening");
-            }
-          });
-        });
-      })
-      .catch((error) => {
-        if (!transcribingRef.current) return;
-        console.warn("EVA live transcription segment failed.", error?.message || error);
-      })
-      .finally(() => {
-        if (transcribingRef.current) {
-          runSegment();
-        }
+    try {
+      setSegmentStatus("recording");
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
+      await new Promise((resolve) => {
+        segmentResolveRef.current = resolve;
+        segmentTimerRef.current = setTimeout(() => {
+          segmentResolveRef.current = null;
+          resolve();
+        }, SEGMENT_MS);
       });
+      segmentResolveRef.current = null;
+      segmentTimerRef.current = null;
+      if (!transcribingRef.current) {
+        await audioRecorder.stop().catch(() => {});
+        return;
+      }
+      setSegmentStatus("processing");
+      await audioRecorder.stop();
+      const uri = audioRecorder.uri || "";
+      if (!uri || !transcribingRef.current) return;
+      const data = await transcribeEvaAudio(uri, { mimeType: getRecordingMimeType(uri) });
+      const text = String(data?.transcript || "").trim();
+      if (text && transcribingRef.current) {
+        setLiveTranscript((current) => (current ? `${current} ${text}` : text));
+        setTranscriptStatus("listening");
+      }
+    } catch (error) {
+      if (transcribingRef.current) {
+        console.warn("EVA live transcription segment failed.", error?.message || error);
+      }
+    }
+    if (transcribingRef.current) {
+      segmentTimerRef.current = setTimeout(() => {
+        segmentTimerRef.current = null;
+        runSegment();
+      }, 150);
+    }
   }
 
   async function startLiveTranscription() {
@@ -110,6 +116,7 @@ export function DocumentsScreen() {
       setTranscriptStatus("mic blocked");
       return;
     }
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true }).catch(() => {});
     transcribingRef.current = true;
     setIsTranscribing(true);
     setTranscriptStatus("listening");

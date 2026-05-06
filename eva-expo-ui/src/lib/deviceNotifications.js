@@ -10,7 +10,7 @@ import {
   resolveMeetingDateRange,
 } from "./meetingDateTime";
 
-export const EVA_REMINDERS_CHANNEL_ID = "eva-reminders";
+export const EVA_REMINDERS_CHANNEL_ID = "eva-reminders-v2";
 const EXPO_GO_NOTIFICATION_MESSAGE =
   "Notifications need a development build on Android. EVA still saves your items in Expo Go.";
 let notificationHandlerReady = false;

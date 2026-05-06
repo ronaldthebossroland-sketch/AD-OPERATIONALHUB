@@ -5,7 +5,7 @@ import { API_BASE_URL } from "./evaApi";
 const VOICE_MODELS = {
   calm:      { model: "aura-2-luna-en",   speed: 0.82 },
   executive: { model: "aura-2-thalia-en", speed: 0.90 },
-  warm:      { model: "aura-2-stella-en", speed: 0.85 },
+  warm:      { model: "aura-2-andromeda-en", speed: 0.85 },
   direct:    { model: "aura-2-athena-en", speed: 0.96 },
 };
 

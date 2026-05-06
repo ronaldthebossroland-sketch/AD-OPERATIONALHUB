@@ -21,6 +21,7 @@ export function CalendarScreen() {
     meetings,
     addMeeting,
     rescheduleMeeting,
+    deleteMeeting,
     handleAssistantCommand,
     phoneCalendarSyncEnabled,
     defaultMeetingReminderMinutes,
@@ -136,6 +137,12 @@ export function CalendarScreen() {
                     onPress={() => handleAssistantCommand(`Prepare a meeting briefing for ${meeting.title}`)}
                     styles={styles}
                   />
+                  <ActionButton
+                    label="Delete"
+                    onPress={() => deleteMeeting(meeting.id)}
+                    styles={styles}
+                    danger
+                  />
                 </View>
               </GlowCard>
             );
@@ -200,10 +207,14 @@ function Field({ styles, colors, style, ...props }) {
   );
 }
 
-function ActionButton({ label, onPress, styles }) {
+function ActionButton({ label, onPress, styles, danger }) {
   return (
-    <TouchableOpacity activeOpacity={0.84} style={styles.actionButton} onPress={onPress}>
-      <Text style={styles.actionButtonText}>{label}</Text>
+    <TouchableOpacity
+      activeOpacity={0.84}
+      style={[styles.actionButton, danger && styles.actionButtonDanger]}
+      onPress={onPress}
+    >
+      <Text style={[styles.actionButtonText, danger && styles.actionButtonDangerText]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -220,6 +231,7 @@ function schedulingHint(meetings) {
 
 function addMinutesToTimeString(timeStr, minutes) {
   if (!timeStr) return timeStr;
+  // H:MM AM/PM or HH:MM AM/PM
   const match12 = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (match12) {
     let hours = parseInt(match12[1], 10);
@@ -234,6 +246,21 @@ function addMinutesToTimeString(timeStr, minutes) {
     const display12 = newHours % 12 === 0 ? 12 : newHours % 12;
     return `${display12}:${String(newMins).padStart(2, "0")} ${newPeriod}`;
   }
+  // H AM/PM (no minutes)
+  const match12NoMin = timeStr.match(/^(\d{1,2})\s*(AM|PM)$/i);
+  if (match12NoMin) {
+    let hours = parseInt(match12NoMin[1], 10);
+    const period = match12NoMin[2].toUpperCase();
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+    const totalMins = hours * 60 + minutes;
+    const newHours = Math.floor(totalMins / 60) % 24;
+    const newMins = totalMins % 60;
+    const newPeriod = newHours >= 12 ? "PM" : "AM";
+    const display12 = newHours % 12 === 0 ? 12 : newHours % 12;
+    return `${display12}:${String(newMins).padStart(2, "0")} ${newPeriod}`;
+  }
+  // HH:MM 24-hour
   const match24 = timeStr.match(/^(\d{1,2}):(\d{2})$/);
   if (match24) {
     const hours = parseInt(match24[1], 10);
@@ -369,6 +396,13 @@ function createStyles({ colors, radii, spacing, type }, compact) {
     actionButtonText: {
       ...type.caption,
       color: colors.text,
+    },
+    actionButtonDanger: {
+      borderColor: "#EF444466",
+      backgroundColor: "#EF444412",
+    },
+    actionButtonDangerText: {
+      color: "#EF4444",
     },
   });
 }

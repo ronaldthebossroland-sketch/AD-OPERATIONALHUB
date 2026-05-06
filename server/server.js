@@ -1545,7 +1545,7 @@ app.post(
 const DEEPGRAM_EVA_VOICE_CONFIGS = {
   calm:      { model: "aura-2-luna-en",   speed: 0.82 },
   executive: { model: "aura-2-thalia-en", speed: 0.90 },
-  warm:      { model: "aura-2-stella-en", speed: 0.85 },
+  warm:      { model: "aura-2-andromeda-en", speed: 0.85 },
   direct:    { model: "aura-2-athena-en", speed: 0.96 },
 };
 
@@ -1613,6 +1613,19 @@ app.post("/api/eva/speak", async (req, res) => {
 });
 
 function buildEvaMobileAssistantPrompt(userMessage, context) {
+  const limitedContext = limitEvaMobileAssistantContext(context);
+  const history = Array.isArray(limitedContext.recentChatHistory) ? limitedContext.recentChatHistory : [];
+  const contextForJson = { ...limitedContext };
+  delete contextForJson.recentChatHistory;
+
+  // Strip the last message if it's the current user turn — it's appended below as "User: ${userMessage}"
+  const historyToRender = history.length > 0 && history[history.length - 1]?.role === "user"
+    ? history.slice(0, -1)
+    : history;
+  const conversationBlock = historyToRender.length > 0
+    ? `\nConversation so far:\n${historyToRender.map((m) => `${m.role === "user" ? "User" : "EVA"}: ${m.content}`).join("\n")}\n`
+    : "";
+
   return `
 ${currentDateContextForPrompt()}
 
@@ -1650,9 +1663,11 @@ Rules:
 - Treat questions like "what tasks need attention" as show_pending_tasks, not create_task.
 - Treat briefing requests about meetings as prepare_meeting_briefing, not create_meeting.
 - Create actions only when the user is clearly asking EVA to create, schedule, reschedule, cancel, or remind.
+- Read the full conversation history before asking any follow-up questions. If the user already provided the time, title, or attendees in an earlier turn, extract those values and act — do not ask again.
+- If a meeting request does not include a time anywhere in the conversation, ask one follow-up question and set action to null.
+- If a meeting request includes a clear time anywhere in the conversation (e.g. "by 3 PM", "at 10 AM", "11:30"), return a create_meeting action immediately. If that time has already passed today, set meeting_date to "tomorrow".
+- Meeting title must be specific. Derive it from the attendee name or topic in the conversation (e.g. "Meeting with Pastor Ruda"). Never use "Executive meeting", "Team meeting", or any other generic title unless the user said those exact words.
 - If a task request does not include a usable task title, ask one follow-up question and set action to null.
-- If a meeting request does not include a time, ask one follow-up question and set action to null.
-- If a meeting request includes a clear time such as "by 3 PM" or "at 10 AM", return a create_meeting action. If that time has already passed today, set meeting_date to "tomorrow" instead of asking for another time.
 - If a reschedule or cancel request does not identify the meeting clearly enough, ask one follow-up question and set action to null.
 - If a reminder request does not include what to remember, ask one follow-up question and set action to null.
 - If a reminder request does not include a time, it is okay to create a reminder preview with reminder_time null.
@@ -1663,10 +1678,9 @@ Rules:
 - Never claim that a record has been saved unless action is not null.
 
 Current EVA context:
-${JSON.stringify(limitEvaMobileAssistantContext(context), null, 2)}
-
-User message:
-${userMessage}
+${JSON.stringify(contextForJson, null, 2)}
+${conversationBlock}
+User: ${userMessage}
   `.trim();
 }
 
