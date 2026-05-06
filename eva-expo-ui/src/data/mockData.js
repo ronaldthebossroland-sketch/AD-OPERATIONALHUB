@@ -1,84 +1,91 @@
-export const prompts = [
+export const assistantPrompts = [
   "Brief me for today",
   "What needs attention?",
   "Schedule a meeting",
-  "Summarize last transcript",
+  "Create a task",
+  "Summarize notes",
   "Prepare my next move",
 ];
 
-export const chat = [
+export const initialTasks = [
   {
-    id: "1",
-    role: "eva",
-    text: "Good evening, Ronald. Your calendar is clear after 4:30 PM, and one operation needs attention.",
+    id: "task-1",
+    title: "Confirm leadership briefing points",
+    detail: "Prepare the three decisions needed before tomorrow morning.",
+    priority: "High",
+    status: "To do",
+    due: "Today, 6:00 PM",
   },
   {
-    id: "2",
-    role: "user",
-    text: "Prepare my next move.",
-  },
-  {
-    id: "3",
-    role: "eva",
-    text: "I would start with the donor follow-up, then confirm tomorrow's leadership review.",
+    id: "task-2",
+    title: "Review follow-up actions",
+    detail: "Check owners for pending ministry operations.",
+    priority: "Medium",
+    status: "In progress",
+    due: "Tomorrow",
   },
 ];
 
-export const meetings = [
+export const initialMeetings = [
   {
-    id: "m1",
-    time: "09:30",
+    id: "meeting-1",
     title: "Leadership sync",
-    meta: "Strategy room",
-    reminder: "10 min before",
-  },
-  {
-    id: "m2",
-    time: "13:00",
-    title: "Operations review",
-    meta: "Finance and facilities",
-    reminder: "30 min before",
-  },
-  {
-    id: "m3",
-    time: "16:30",
-    title: "Pastoral briefing",
-    meta: "Decision prep",
-    reminder: "15 min before",
+    date: "Today",
+    time: "4:30 PM",
+    attendees: "Executive team",
+    briefing: "Decisions, risks, and follow-up owners.",
+    reminder: "15 minutes before",
   },
 ];
 
-export const operations = [
+export const initialDocuments = [
   {
-    id: "o1",
-    status: "high",
-    title: "Vendor approval pending",
-    meta: "Budget exposure requires review before noon.",
-  },
-  {
-    id: "o2",
-    status: "attention",
-    title: "Follow-up list is growing",
-    meta: "Eight items need owner confirmation.",
-  },
-  {
-    id: "o3",
-    status: "stable",
-    title: "Weekend service plan",
-    meta: "Staffing and room preparation are on track.",
+    id: "doc-1",
+    title: "Service planning notes",
+    type: "Briefing note",
+    updatedAt: "Today",
+    content:
+      "Media timeline, venue checklist, volunteer coverage, and budget approvals need review before the next leadership sync.",
+    summary:
+      "Planning is mostly stable. Media timeline and budget approval need confirmation.",
   },
 ];
 
-export const transcriptActions = [
-  "Confirm media team timeline",
-  "Send venue checklist",
-  "Move finance review to operations",
+export const initialReminders = [
+  {
+    id: "reminder-1",
+    title: "Prepare leadership sync",
+    due: "Today, 4:15 PM",
+  },
+];
+
+export const quickActions = [
+  {
+    title: "Brief me",
+    prompt: "Brief me for today",
+    icon: "flash-outline",
+  },
+  {
+    title: "New meeting",
+    prompt: "Schedule a meeting",
+    icon: "calendar-outline",
+  },
+  {
+    title: "New task",
+    prompt: "Create a task",
+    icon: "checkbox-outline",
+  },
+  {
+    title: "Summarize",
+    prompt: "Summarize notes",
+    icon: "document-text-outline",
+  },
 ];
 
 export const settingsItems = [
   {
     title: "Profile",
-    description: "Ronald Roland",
+    description: "Your EVA account",
     icon: "person-circle-outline",
   },
   {
@@ -95,5 +102,10 @@ export const settingsItems = [
     title: "AI behavior",
     description: "Executive, concise, proactive",
     icon: "sparkles-outline",
+  },
+  {
+    title: "Preview mode",
+    description: "This device workspace",
+    icon: "phone-portrait-outline",
   },
 ];

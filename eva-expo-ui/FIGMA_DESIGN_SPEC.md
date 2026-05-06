@@ -2,7 +2,7 @@
 
 ## Product
 
-Executive Virtual Assistant is a Jarvis-style executive AI assistant for operations, meetings, decisions, transcripts, and daily workflow.
+Executive Virtual Assistant is a Jarvis-style executive AI assistant for tasks, meetings, decisions, documents, reminders, and daily workflow.
 
 ## Frame
 
@@ -84,57 +84,72 @@ Large circular button with electric blue inner gradient and violet outer glow.
 
 ### Bottom Nav
 
-Five items: EVA, Calendar, Operations, Transcripts, Settings. Active item uses blue glow and brighter text.
+Six items: Home, EVA, Tasks, Meetings, Docs, Settings. Active item uses blue glow and brighter text.
 
 ## Screens
 
-### EVA Assistant
+### Home / Command Center
+
+Purpose: overview.
+
+Content:
+
+- Header: Good evening, Ronald
+- Status: All systems operational
+- Main command input
+- Quick actions
+- Dashboard metrics
+- Next move card
+- Upcoming meeting card
+
+### Assistant Chat
 
 Purpose: brain.
 
 Content:
 
-- Header: Good evening, Ronald
-- Status: EVA is ready
+- Header: Assistant Chat
+- Status: EVA command state
 - Main command input
 - Suggested prompts
 - Modern chat bubbles
-- AI typing indicator
+- Local action indicator
 - Floating mic button
 
-### Calendar
-
-Purpose: time.
-
-Content:
-
-- Today timeline
-- Upcoming meetings
-- Smart scheduling suggestion: You have a 2-hour gap available
-- Clean event cards
-
-### Operations
+### Tasks
 
 Purpose: execution.
 
 Content:
 
-- High-risk items
-- Needs attention
-- Stable operations
-- Priority cards with red, amber, and green indicators
+- Create task form
+- Priority chips
+- Task cards
+- Status controls
+- Due date and priority indicators
 
-### Transcripts
+### Calendar / Meetings
+
+Purpose: time.
+
+Content:
+
+- Create meeting form
+- Upcoming meetings
+- Smart scheduling suggestion: You have a 2-hour gap available
+- Clean meeting cards
+- Reschedule and briefing actions
+
+### Documents / Knowledge
 
 Purpose: memory.
 
 Content:
 
-- Record button
-- Live transcription panel
-- AI summary card
-- Extracted action items
-- Add to Operations button
+- Capture knowledge form
+- Saved notes
+- AI summary preview
+- Knowledge cards
 
 ### Settings
 
@@ -146,4 +161,4 @@ Content:
 - Notifications
 - Voice settings
 - AI behavior
-- Logout
+- Preview mode status

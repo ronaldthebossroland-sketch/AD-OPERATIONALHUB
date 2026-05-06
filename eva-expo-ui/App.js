@@ -1,135 +1,226 @@
-import { useEffect, useMemo, useState } from "react";
-import { SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Platform,
+  StatusBar,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
-import { AuthScreen } from "./src/components/AuthScreen";
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomNav } from "./src/components/BottomNav";
-import { LoadingScreen } from "./src/components/LoadingScreen";
-import { syncBackendSession } from "./src/lib/api";
-import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
+import { OnboardingTutorial } from "./src/components/OnboardingTutorial";
+import {
+  EVAAppProvider,
+  EVA_TUTORIAL_COMPLETE_KEY,
+  EVA_POST_TUTORIAL_PERMISSIONS_KEY,
+  useEVAApp,
+} from "./src/state/EVAAppContext";
+import { AuthScreen } from "./src/screens/AuthScreen";
+import { HomeScreen } from "./src/screens/HomeScreen";
 import { AssistantScreen } from "./src/screens/AssistantScreen";
 import { CalendarScreen } from "./src/screens/CalendarScreen";
-import { OperationsScreen } from "./src/screens/OperationsScreen";
-import { TranscriptsScreen } from "./src/screens/TranscriptsScreen";
+import { DocumentsScreen } from "./src/screens/DocumentsScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
-import { colors, spacing, type } from "./src/theme";
+import { TasksScreen } from "./src/screens/TasksScreen";
+import { spacing } from "./src/theme";
+
+const TUTORIAL_COMPLETE_KEY = EVA_TUTORIAL_COMPLETE_KEY;
+const POST_TUTORIAL_PERMISSIONS_KEY = EVA_POST_TUTORIAL_PERMISSIONS_KEY;
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState("eva");
-  const [booting, setBooting] = useState(true);
-  const [session, setSession] = useState(null);
-  const [appUser, setAppUser] = useState(null);
-  const [sessionWarning, setSessionWarning] = useState("");
+  return (
+    <SafeAreaProvider>
+      <EVAAppProvider>
+        <AppShell />
+      </EVAAppProvider>
+    </SafeAreaProvider>
+  );
+}
 
-  useEffect(() => {
-    let mounted = true;
+function AppShell() {
+  const [activeTab, setActiveTab] = useState("home");
+  const [showTutorial, setShowTutorial] = useState(false);
+  const permissionFlowStartedRef = useRef(false);
+  const {
+    authLoading,
+    currentUser,
+    localPreviewUnlocked,
+    requestPostTutorialPermissions,
+    theme,
+  } = useEVAApp();
+  const { colors } = theme;
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const shortestSide = Math.min(width, height);
+  const foldTaskbarOffset =
+    Platform.OS === "android" && shortestSide >= 600 ? 68 : 0;
+  const bottomSpace = Math.max(insets.bottom, spacing.lg) + foldTaskbarOffset;
+  const isAuthenticated = Boolean(currentUser?.id) || localPreviewUnlocked;
+  const completeTutorial = useCallback(async () => {
+    setShowTutorial(false);
+    await AsyncStorage.setItem(TUTORIAL_COMPLETE_KEY, "true").catch((error) => {
+      console.warn("EVA tutorial completion could not be saved.", error?.message || error);
+    });
+    const alreadyAsked = await AsyncStorage.getItem(POST_TUTORIAL_PERMISSIONS_KEY).catch(
+      () => null
+    );
 
-    async function bootstrap() {
-      if (!isSupabaseConfigured || !supabase) {
-        setBooting(false);
-        return;
-      }
-
-      try {
-        const {
-          data: { session: currentSession },
-        } = await supabase.auth.getSession();
-
-        if (!mounted) {
-          return;
-        }
-
-        setSession(currentSession || null);
-
-        if (currentSession?.access_token) {
-          try {
-            const synced = await syncBackendSession(currentSession.access_token);
-            if (mounted) {
-              setAppUser(synced?.user || null);
-              setSessionWarning("");
-            }
-          } catch (error) {
-            if (mounted) {
-              setSessionWarning(error.message || "Backend session sync failed.");
-            }
-          }
-        }
-      } finally {
-        if (mounted) {
-          setBooting(false);
-        }
-      }
+    if (alreadyAsked === "true") {
+      return;
     }
 
-    bootstrap();
+    if (permissionFlowStartedRef.current) {
+      return;
+    }
 
-    const { data } =
-      supabase?.auth.onAuthStateChange(async (_event, nextSession) => {
-        setSession(nextSession || null);
-
-        if (!nextSession?.access_token) {
-          setAppUser(null);
-          setSessionWarning("");
-          return;
-        }
-
-        try {
-          const synced = await syncBackendSession(nextSession.access_token);
-          setAppUser(synced?.user || null);
-          setSessionWarning("");
-        } catch (error) {
-          setSessionWarning(error.message || "Backend session sync failed.");
-        }
-      }) || {};
-
-    return () => {
-      mounted = false;
-      data?.subscription?.unsubscribe?.();
-    };
+    permissionFlowStartedRef.current = true;
+    await requestPostTutorialPermissions?.().catch((error) => {
+      console.warn("EVA post-tutorial permissions could not complete.", error?.message || error);
+    });
+    await AsyncStorage.setItem(POST_TUTORIAL_PERMISSIONS_KEY, "true").catch(() => {});
+  }, [requestPostTutorialPermissions]);
+  const handleTabChange = useCallback((nextTab) => {
+    if (showTutorial) {
+      completeTutorial();
+    }
+    setActiveTab((currentTab) => (currentTab === nextTab ? currentTab : nextTab));
+  }, [completeTutorial, showTutorial]);
+  const handleTutorialNavigate = useCallback((nextTab) => {
+    setActiveTab((currentTab) => (currentTab === nextTab ? currentTab : nextTab));
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!isAuthenticated) {
+      permissionFlowStartedRef.current = false;
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    AsyncStorage.getItem(TUTORIAL_COMPLETE_KEY)
+      .then(async (value) => {
+        if (!isMounted) {
+          return;
+        }
+
+        const tutorialDone = value === "true";
+        setShowTutorial(!tutorialDone);
+
+        if (tutorialDone) {
+          const permissionsAsked = await AsyncStorage.getItem(
+            POST_TUTORIAL_PERMISSIONS_KEY
+          ).catch(() => null);
+
+          if (
+            isMounted &&
+            permissionsAsked !== "true" &&
+            !permissionFlowStartedRef.current
+          ) {
+            permissionFlowStartedRef.current = true;
+            await requestPostTutorialPermissions?.().catch((error) => {
+              console.warn(
+                "EVA post-tutorial permissions could not complete.",
+                error?.message || error
+              );
+            });
+            await AsyncStorage.setItem(
+              POST_TUTORIAL_PERMISSIONS_KEY,
+              "true"
+            ).catch(() => {});
+          }
+        }
+      })
+      .catch((error) => {
+        console.warn("EVA tutorial status could not be loaded.", error?.message || error);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
   const screen = useMemo(() => {
+    if (authLoading) {
+      return <AuthLoading colors={colors} />;
+    }
+
+    if (!isAuthenticated) {
+      return <AuthScreen />;
+    }
+
     switch (activeTab) {
+      case "assistant":
+        return <AssistantScreen />;
+      case "tasks":
+        return <TasksScreen />;
       case "calendar":
         return <CalendarScreen />;
-      case "operations":
-        return <OperationsScreen />;
-      case "transcripts":
-        return <TranscriptsScreen />;
+      case "documents":
+        return <DocumentsScreen />;
       case "settings":
-        return <SettingsScreen appUser={appUser} session={session} />;
-      case "eva":
+        return <SettingsScreen />;
+      case "home":
       default:
-        return <AssistantScreen />;
+        return <HomeScreen onNavigate={handleTabChange} />;
     }
-  }, [activeTab, appUser, session]);
-
-  if (booting) {
-    return <LoadingScreen />;
-  }
-
-  if (!session) {
-    return <AuthScreen onAuthenticated={setSession} />;
-  }
+  }, [activeTab, authLoading, colors, handleTabChange, isAuthenticated]);
 
   return (
     <LinearGradient
-      colors={[colors.bgTop, colors.bg, colors.bgDeep]}
+      colors={colors.gradient}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.root}
     >
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.glowTop} />
-        <View style={styles.glowBottom} />
-        {sessionWarning ? (
-          <View style={styles.warning}>
-            <Text style={styles.warningText}>{sessionWarning}</Text>
-          </View>
+      <StatusBar barStyle={colors.statusBar} backgroundColor={colors.bgTop} />
+      <SafeAreaView edges={["top", "left", "right"]} style={styles.safeArea}>
+        <View pointerEvents="none" style={[styles.glowTop, { backgroundColor: colors.glowTop }]} />
+        <View pointerEvents="none" style={[styles.glowBottom, { backgroundColor: colors.glowBottom }]} />
+        <View
+          style={[
+            styles.screen,
+            { paddingBottom: isAuthenticated ? 86 + bottomSpace : 0 },
+          ]}
+        >
+          {screen}
+        </View>
+        {isAuthenticated ? (
+          <>
+            <BottomNav
+              activeTab={activeTab}
+              onChange={handleTabChange}
+              bottomInset={insets.bottom}
+              bottomOffset={foldTaskbarOffset}
+            />
+            {showTutorial ? (
+              <OnboardingTutorial
+                visible={showTutorial}
+                onComplete={completeTutorial}
+                onNavigate={handleTutorialNavigate}
+              />
+            ) : null}
+          </>
         ) : null}
-        <View style={styles.screen}>{screen}</View>
-        <BottomNav activeTab={activeTab} onChange={setActiveTab} />
       </SafeAreaView>
     </LinearGradient>
+  );
+}
+
+function AuthLoading({ colors }) {
+  return (
+    <View style={styles.loading}>
+      <ActivityIndicator size="large" color={colors.electric} />
+      <Text style={[styles.loadingText, { color: colors.textSoft }]}>
+        Restoring EVA session
+      </Text>
+    </View>
   );
 }
 
@@ -143,20 +234,18 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
-    paddingBottom: 86,
+    zIndex: 1,
   },
-  warning: {
-    marginHorizontal: spacing.xl,
-    marginTop: spacing.sm,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(251, 191, 36, 0.26)",
-    backgroundColor: "rgba(251, 191, 36, 0.12)",
-    padding: spacing.md,
+  loading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.md,
   },
-  warningText: {
-    ...type.caption,
-    color: colors.textSoft,
+  loadingText: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: "800",
   },
   glowTop: {
     position: "absolute",

@@ -1,7 +1,11 @@
+import { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { colors, spacing, type } from "../theme";
+import { useEVAApp } from "../state/EVAAppContext";
 
 export function SectionTitle({ title, action }) {
+  const { theme } = useEVAApp();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   return (
     <View style={styles.row}>
       <Text style={styles.title}>{title}</Text>
@@ -10,19 +14,21 @@ export function SectionTitle({ title, action }) {
   );
 }
 
-const styles = StyleSheet.create({
-  row: {
-    marginTop: spacing.xl,
-    marginBottom: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  title: {
-    ...type.h2,
-  },
-  action: {
-    ...type.caption,
-    color: colors.electric,
-  },
-});
+function createStyles({ colors, spacing, type }) {
+  return StyleSheet.create({
+    row: {
+      marginTop: spacing.xl,
+      marginBottom: spacing.md,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    title: {
+      ...type.h2,
+    },
+    action: {
+      ...type.caption,
+      color: colors.electric,
+    },
+  });
+}

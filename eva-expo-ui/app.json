@@ -1,33 +1,75 @@
 {
   "expo": {
-    "name": "Executive Virtual Assistant",
+    "name": "EVA",
     "slug": "executive-virtual-assistant",
     "scheme": "evaassistant",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
     "assetBundlePatterns": [
       "**/*"
     ],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f7f8fb"
+    },
     "android": {
       "package": "com.adoperationalhub.eva",
+      "versionCode": 1,
       "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f7f8fb"
+      },
       "permissions": [
         "INTERNET",
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "READ_CALENDAR",
+        "WRITE_CALENDAR",
+        "POST_NOTIFICATIONS",
+        "android.permission.READ_CALENDAR",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "ios": {
-      "supportsTablet": false,
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "EVA uses the microphone to record transcripts when you choose to start recording."
-      }
+      "supportsTablet": false
     },
     "plugins": [
-      "expo-web-browser",
-      "expo-audio",
       "expo-font",
-      "expo-system-ui"
-    ]
+      "expo-system-ui",
+      "expo-sqlite",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow EVA to add meetings to your phone calendar.",
+          "remindersPermission": "Allow EVA to read reminders if you enable native reminder support."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "eva-reminders",
+          "sounds": ["assets/sounds/eva_reminder_chime.wav"]
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow EVA to listen for voice commands.",
+          "recordAudioAndroid": true
+        }
+      ],
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "30ba575c-bfe3-4ae9-a0f4-b81e84508019"
+      }
+    },
+    "owner": "ronald8890"
   }
 }

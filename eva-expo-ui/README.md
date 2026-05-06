@@ -2,15 +2,16 @@
 
 Premium mobile-first Expo UI concept for Executive Virtual Assistant, also known as EVA.
 
-This folder contains a reusable React Native component system and five polished screen compositions:
+This folder contains a reusable React Native component system and six clickable screen compositions:
 
-- EVA Assistant
-- Calendar
-- Operations
-- Transcripts
+- Home / Command Center
+- Assistant Chat
+- Tasks
+- Calendar / Meetings
+- Documents / Knowledge
 - Settings
 
-No backend logic is included. All data is static mock content for design and handoff.
+No backend logic is included in this phase. The preview uses local state and mock content so the full mobile flow can be tested before connecting auth, Supabase, Gemini/OpenAI, calendar integrations, notifications, or transcription.
 
 ## Run As A Standalone Expo Prototype
 

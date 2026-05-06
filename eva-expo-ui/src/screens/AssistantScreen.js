@@ -1,218 +1,353 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useAudioRecorder, useAudioRecorderState } from "expo-audio";
 import { CommandInput } from "../components/CommandInput";
 import { FloatingMic } from "../components/FloatingMic";
 import { GlowCard } from "../components/GlowCard";
 import { PromptChip } from "../components/PromptChip";
 import { ScreenHeader } from "../components/ScreenHeader";
 import { SectionTitle } from "../components/SectionTitle";
-import { StatusPill } from "../components/StatusPill";
-import { prompts } from "../data/mockData";
-import { sendAssistantChat } from "../lib/api";
-import { colors, radii, spacing, type } from "../theme";
+import { useEVAApp } from "../state/EVAAppContext";
+import { requestMicrophonePermission } from "../lib/devicePermissions";
+import { transcribeEvaAudio } from "../lib/evaApi";
+import { speakEvaReply, stopEvaSpeech } from "../lib/evaSpeech";
+import {
+  VOICE_RECORDING_MAX_MS,
+  VOICE_RECORDING_OPTIONS,
+  cancelRecording,
+  startRecording,
+  stopRecording,
+} from "../lib/voiceRecorder";
 
-const initialMessages = [
-  {
-    id: "welcome",
-    role: "assistant",
-    content:
-      "Good evening, Ronald. EVA is ready to help with meetings, operations, transcripts, and daily decisions.",
-  },
-];
+const VOICE_PERMISSION_MESSAGE =
+  "Microphone access is needed for voice commands. You can still type commands manually.";
+const VOICE_TRANSCRIPTION_ERROR =
+  "I couldn't transcribe that clearly. Please try again or type your command.";
 
 export function AssistantScreen() {
-  const [messages, setMessages] = useState(initialMessages);
+  const {
+    theme,
+    assistantPrompts,
+    chatMessages,
+    handleAssistantCommand,
+    addAssistantNotice,
+    updateVoiceIntegrationStatus,
+    voiceMode,
+  } = useEVAApp();
+  const { width } = useWindowDimensions();
+  const compact = width < 390;
+  const { colors } = theme;
+  const styles = useMemo(() => createStyles(theme, compact), [compact, theme]);
   const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
+  const [status, setStatus] = useState("Ready");
+  const [voiceState, setVoiceState] = useState("idle");
+  const [voiceMessage, setVoiceMessage] = useState("");
   const scrollRef = useRef(null);
+  const autoStopRef = useRef(null);
+  const stoppingRef = useRef(false);
+  const audioRecorder = useAudioRecorder(VOICE_RECORDING_OPTIONS);
+  const recorderState = useAudioRecorderState(audioRecorder, 250);
+  const clearVoiceTimer = useCallback(() => {
+    if (autoStopRef.current) {
+      clearTimeout(autoStopRef.current);
+      autoStopRef.current = null;
+    }
+  }, []);
 
-  const apiMessages = useMemo(
-    () =>
-      messages
-        .filter((message) => message.role === "user" || message.role === "assistant")
-        .map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
-    [messages]
-  );
+  useEffect(() => {
+    return () => {
+      clearVoiceTimer();
+      cancelRecording(audioRecorder).catch(() => {});
+      stopEvaSpeech();
+    };
+  }, [audioRecorder, clearVoiceTimer]);
 
   async function submitMessage(text = draft) {
     const content = text.trim();
 
-    if (!content || sending) {
+    if (!content) {
       return;
     }
 
-    const userMessage = {
-      id: `${Date.now()}-user`,
-      role: "user",
-      content,
-    };
-    const nextMessages = [...messages, userMessage];
-    setMessages(nextMessages);
+    setStatus("Processing command");
     setDraft("");
-    setError("");
-    setSending(true);
 
     try {
-      const response = await sendAssistantChat([
-        ...apiMessages,
-        { role: "user", content },
-      ]);
-      setMessages((current) => [
-        ...current,
-        {
-          id: `${Date.now()}-eva`,
-          role: "assistant",
-          content: response.reply || "I am ready. What would you like to do next?",
-          intent: response.intent,
-          actions: response.actions || [],
-        },
-      ]);
-    } catch (requestError) {
-      setError(requestError.message || "EVA could not respond.");
-      setMessages((current) => [
-        ...current,
-        {
-          id: `${Date.now()}-error`,
-          role: "assistant",
-          content:
-            "I could not reach the assistant backend. Please check your connection and try again.",
-        },
-      ]);
+      return await handleAssistantCommand(content);
     } finally {
-      setSending(false);
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
+      setTimeout(() => setStatus("Ready"), 420);
     }
   }
 
+  async function handleMicPress() {
+    if (voiceState === "transcribing") {
+      return;
+    }
+
+    if (voiceState === "listening" || recorderState.isRecording) {
+      await stopAndTranscribe();
+      return;
+    }
+
+    await beginVoiceRecording();
+  }
+
+  async function beginVoiceRecording() {
+    setStatus("Requesting microphone");
+    setVoiceMessage("");
+
+    const permission = await requestMicrophonePermission();
+    const permissionStatus = permissionStatusLabel(permission);
+
+    updateVoiceIntegrationStatus({
+      microphoneStatus: permissionStatus,
+      message: permission.granted ? "" : VOICE_PERMISSION_MESSAGE,
+    });
+
+    if (!permission.granted) {
+      setStatus("Ready");
+      setVoiceState("idle");
+      setVoiceMessage(VOICE_PERMISSION_MESSAGE);
+      addAssistantNotice(VOICE_PERMISSION_MESSAGE);
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
+      return;
+    }
+
+    try {
+      await startRecording(audioRecorder);
+      setVoiceState("listening");
+      setStatus("Listening");
+      setVoiceMessage("Listening... tap the mic again when you are done.");
+      clearVoiceTimer();
+      autoStopRef.current = setTimeout(() => {
+        stopAndTranscribe({ autoStopped: true }).catch(() => {});
+      }, VOICE_RECORDING_MAX_MS);
+    } catch (error) {
+      setStatus("Ready");
+      setVoiceState("idle");
+      setVoiceMessage("Voice recording could not start. You can still type commands manually.");
+      updateVoiceIntegrationStatus({
+        deepgramStatus: "not_connected",
+        message: error?.message || "Voice recording could not start.",
+      });
+      console.warn("EVA voice recording failed.", error?.message || error);
+    }
+  }
+
+  async function stopAndTranscribe({ autoStopped = false } = {}) {
+    if (stoppingRef.current) {
+      return;
+    }
+
+    stoppingRef.current = true;
+    clearVoiceTimer();
+    setVoiceState("transcribing");
+    setStatus("Transcribing");
+    setVoiceMessage(
+      autoStopped
+        ? "Voice limit reached. Transcribing your command..."
+        : "Transcribing your command..."
+    );
+
+    let submittedTranscript = false;
+
+    try {
+      const recording = await stopRecording(audioRecorder);
+
+      if (!recording.uri) {
+        throw new Error("No recording file was created.");
+      }
+
+      const result = await transcribeEvaAudio(recording.uri, {
+        mimeType: recording.mimeType,
+      });
+      const transcript = String(result?.transcript || "").trim();
+
+      if (!transcript) {
+        throw new Error("Voice transcription returned an empty transcript.");
+      }
+
+      updateVoiceIntegrationStatus({
+        microphoneStatus: "connected",
+        deepgramStatus: "connected",
+        message: "",
+      });
+      setVoiceMessage("");
+      setVoiceState("idle");
+      submittedTranscript = true;
+      const spokenReply = await submitMessage(transcript);
+      const speechResult = await speakEvaReply(spokenReply, voiceMode);
+      if (!speechResult.ok) {
+        updateVoiceIntegrationStatus({
+          message: speechResult.message,
+        });
+      }
+    } catch (error) {
+      console.warn("EVA voice transcription failed.", error?.message || error);
+      updateVoiceIntegrationStatus({
+        deepgramStatus: "unavailable",
+        message: error?.message || VOICE_TRANSCRIPTION_ERROR,
+      });
+      setVoiceMessage(VOICE_TRANSCRIPTION_ERROR);
+      addAssistantNotice(VOICE_TRANSCRIPTION_ERROR);
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
+    } finally {
+      stoppingRef.current = false;
+      if (!submittedTranscript) {
+        setVoiceState("idle");
+        setStatus("Ready");
+      }
+    }
+  }
+
+  const processingText =
+    voiceState === "listening"
+      ? "EVA is listening"
+      : voiceState === "transcribing"
+        ? "EVA is transcribing your voice command"
+        : "EVA is processing the command";
+
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={styles.root}
     >
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.content}
         onContentSizeChange={() => scrollRef.current?.scrollToEnd?.({ animated: true })}
       >
-        <ScreenHeader title="Good evening, Ronald" subtitle="EVA is ready" eyebrow="Executive Virtual Assistant" />
+        <ScreenHeader title="Assistant Chat" subtitle="Command EVA with natural language" eyebrow="EVA" />
         <View style={styles.padded}>
-          <CommandInput
-            value={draft}
-            onChangeText={setDraft}
-            onSubmit={() => submitMessage()}
-            disabled={sending}
-          />
           <View style={styles.promptWrap}>
-            {prompts.map((prompt) => (
+            {assistantPrompts.map((prompt) => (
               <PromptChip key={prompt} label={prompt} onPress={() => submitMessage(prompt)} />
             ))}
           </View>
 
           <SectionTitle title="Command Thread" action="Live" />
           <GlowCard elevated style={styles.thread}>
-            {messages.map((item) => (
+            {chatMessages.map((item) => (
               <View key={item.id} style={[styles.bubble, item.role === "user" && styles.userBubble]}>
                 <Text style={styles.bubbleLabel}>{item.role === "assistant" ? "EVA" : "You"}</Text>
                 <Text style={styles.bubbleText}>{item.content}</Text>
               </View>
             ))}
-            {sending ? (
+            {status !== "Ready" ? (
               <View style={styles.typingRow}>
                 <Ionicons name="pulse-outline" size={16} color={colors.electric} />
-                <Text style={styles.typingText}>EVA is thinking</Text>
-                <ActivityIndicator color={colors.electric} size="small" />
+                <Text style={styles.typingText}>{processingText}</Text>
               </View>
             ) : null}
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          </GlowCard>
-
-          <SectionTitle title="System Status" />
-          <GlowCard style={styles.statusCard}>
-            <StatusPill label="All systems operational" />
-            <Text style={styles.statusText}>Calendar, transcripts, and operations are synchronized for today's workflow.</Text>
           </GlowCard>
         </View>
       </ScrollView>
-      <FloatingMic onPress={() => setError("Voice chat is being prepared. Use typed commands for this phase.")} />
+      <View style={styles.composer}>
+        {voiceMessage ? (
+          <Text style={styles.voiceStatusText}>{voiceMessage}</Text>
+        ) : null}
+        <CommandInput
+          value={draft}
+          onChangeText={setDraft}
+          onSubmit={() => submitMessage()}
+          disabled={voiceState === "transcribing"}
+        />
+      </View>
+      <FloatingMic onPress={handleMicPress} state={voiceState} disabled={voiceState === "transcribing"} />
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
-  content: {
-    paddingBottom: 24,
-  },
-  padded: {
-    paddingHorizontal: spacing.xl,
-  },
-  promptWrap: {
-    marginTop: spacing.lg,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  thread: {
-    gap: spacing.md,
-  },
-  bubble: {
-    alignSelf: "flex-start",
-    maxWidth: "86%",
-    borderRadius: radii.lg,
-    backgroundColor: "rgba(56, 189, 248, 0.1)",
-    padding: spacing.md,
-  },
-  userBubble: {
-    alignSelf: "flex-end",
-    backgroundColor: "rgba(124, 58, 237, 0.16)",
-  },
-  bubbleLabel: {
-    ...type.micro,
-    color: colors.electric,
-    marginBottom: spacing.xs,
-  },
-  bubbleText: {
-    ...type.body,
-    color: colors.text,
-  },
-  typingRow: {
-    marginTop: spacing.sm,
-    borderRadius: radii.lg,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    padding: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  typingText: {
-    ...type.caption,
-    flex: 1,
-    color: colors.textSoft,
-  },
-  errorText: {
-    ...type.caption,
-    color: colors.amber,
-  },
-  statusCard: {
-    gap: spacing.md,
-  },
-  statusText: {
-    ...type.body,
-  },
-});
+function permissionStatusLabel(permission = {}) {
+  if (permission.granted) return "connected";
+  if (permission.status === "denied") return "denied";
+  if (permission.status === "unavailable") return "unavailable";
+  return "not_connected";
+}
+
+function createStyles({ colors, radii, spacing, type }, compact) {
+  return StyleSheet.create({
+    root: {
+      flex: 1,
+    },
+    content: {
+      paddingBottom: spacing.lg,
+    },
+    padded: {
+      paddingHorizontal: compact ? spacing.lg : spacing.xl,
+    },
+    composer: {
+      paddingHorizontal: compact ? spacing.lg : spacing.xl,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.md,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.isDark
+        ? "rgba(6, 11, 24, 0.94)"
+        : "rgba(249, 250, 251, 0.94)",
+    },
+    promptWrap: {
+      marginTop: spacing.lg,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.sm,
+    },
+    thread: {
+      gap: spacing.md,
+    },
+    bubble: {
+      alignSelf: "flex-start",
+      maxWidth: "86%",
+      borderRadius: radii.lg,
+      backgroundColor: colors.navActive,
+      padding: spacing.md,
+    },
+    userBubble: {
+      alignSelf: "flex-end",
+      backgroundColor: colors.isDark
+        ? "rgba(124, 58, 237, 0.16)"
+        : "rgba(124, 58, 237, 0.1)",
+    },
+    bubbleLabel: {
+      ...type.micro,
+      color: colors.electric,
+      marginBottom: spacing.xs,
+    },
+    bubbleText: {
+      ...type.body,
+      color: colors.text,
+    },
+    typingRow: {
+      marginTop: spacing.sm,
+      borderRadius: radii.lg,
+      backgroundColor: colors.input,
+      padding: spacing.md,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    typingText: {
+      ...type.caption,
+      flex: 1,
+      color: colors.textSoft,
+    },
+    voiceStatusText: {
+      ...type.caption,
+      color: colors.textSoft,
+      marginBottom: spacing.sm,
+      paddingHorizontal: spacing.xs,
+    },
+  });
+}

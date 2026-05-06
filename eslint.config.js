@@ -7,6 +7,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores([
     'dist',
+    'eva-expo-ui/dist',
     'android/.gradle',
     'android/build',
     'android/app/build',

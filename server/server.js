@@ -1542,6 +1542,76 @@ app.post(
   }
 );
 
+const DEEPGRAM_EVA_VOICE_CONFIGS = {
+  calm:      { model: "aura-2-luna-en",   speed: 0.82 },
+  executive: { model: "aura-2-thalia-en", speed: 0.90 },
+  warm:      { model: "aura-2-stella-en", speed: 0.85 },
+  direct:    { model: "aura-2-athena-en", speed: 0.96 },
+};
+
+app.post("/api/eva/speak", async (req, res) => {
+  try {
+    if (!deepgram) {
+      return res.status(503).json({
+        error: "Deepgram voice is not configured on the backend.",
+        provider: "deepgram",
+      });
+    }
+
+    const text = cleanText(String(req.body?.text || "")).slice(0, 1200);
+    if (!text) {
+      return res.status(400).json({ error: "Text is required for speech." });
+    }
+
+    const voiceMode = String(req.body?.voiceMode || "executive").toLowerCase();
+    const voiceConfig =
+      DEEPGRAM_EVA_VOICE_CONFIGS[voiceMode] ||
+      DEEPGRAM_EVA_VOICE_CONFIGS.executive;
+    const voiceModel =
+      process.env.DEEPGRAM_VOICE_MODEL?.trim() || voiceConfig.model;
+
+    let audioBuffer;
+    try {
+      const audio = await deepgram.speak.v1.audio.generate({
+        text,
+        model: voiceModel,
+        encoding: "linear16",
+        container: "wav",
+        speed: voiceConfig.speed,
+      });
+      audioBuffer = Buffer.from(await audio.arrayBuffer());
+    } catch (deepgramError) {
+      console.error("EVA Deepgram TTS generation error:", {
+        message: deepgramError?.message || "TTS generation failed.",
+        model: voiceModel,
+      });
+      return res.status(502).json({
+        error: "Deepgram could not generate voice audio.",
+        provider: "deepgram",
+      });
+    }
+
+    if (!audioBuffer.length) {
+      return res.status(502).json({
+        error: "Deepgram returned empty audio.",
+        provider: "deepgram",
+      });
+    }
+
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(audioBuffer);
+  } catch (error) {
+    console.error("EVA TTS route error:", {
+      message: error?.message || "Unexpected TTS error.",
+    });
+    return res.status(500).json({
+      error: "Could not create voice audio right now.",
+      provider: "deepgram",
+    });
+  }
+});
+
 function buildEvaMobileAssistantPrompt(userMessage, context) {
   return `
 ${currentDateContextForPrompt()}
