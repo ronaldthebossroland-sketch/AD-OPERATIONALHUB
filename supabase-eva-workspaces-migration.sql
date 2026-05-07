@@ -263,9 +263,9 @@ begin
 
   select *
   into workspace_row
-  from public.eva_workspaces
-  where app_source = 'eva'
-    and invite_code = normalized_code
+  from public.eva_workspaces w
+  where w.app_source = 'eva'
+    and w.invite_code = normalized_code
   limit 1;
 
   if workspace_row.id is null then

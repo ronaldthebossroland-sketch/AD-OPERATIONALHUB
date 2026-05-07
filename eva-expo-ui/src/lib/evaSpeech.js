@@ -122,9 +122,18 @@ function arrayBufferToBase64(buffer) {
 }
 
 function cleanSpeechText(text) {
-  return String(text || "")
+  const cleaned = String(text || "")
     .replace(/\s+/g, " ")
     .replace(/Recommended next move:/gi, "Next move:")
-    .trim()
-    .slice(0, 900);
+    .trim();
+
+  // Speak only the first two sentences - Deepgram generation time scales with length
+  const sentencePattern = /[.!?](\s|$)/g;
+  let count = 0;
+  let cutAt = cleaned.length;
+  let match;
+  while ((match = sentencePattern.exec(cleaned)) !== null) {
+    if (++count === 2) { cutAt = match.index + 1; break; }
+  }
+  return cleaned.slice(0, Math.min(cutAt, 300)).trim();
 }
