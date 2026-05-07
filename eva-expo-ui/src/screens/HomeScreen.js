@@ -3,6 +3,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -25,12 +26,45 @@ export function HomeScreen({ onNavigate }) {
     reminders,
     handleAssistantCommand,
     profile,
+    workspaces,
+    activeWorkspace,
+    activeWorkspaceId,
+    workspaceMode,
+    workspaceStatus,
+    selectWorkspace,
+    createWorkspace,
+    joinWorkspace,
   } = useEVAApp();
   const { width } = useWindowDimensions();
   const layout = useMemo(() => getHomeLayout(width), [width]);
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme, layout), [theme, layout]);
   const [command, setCommand] = useState("");
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
+
+  async function submitWorkspace() {
+    if (!workspaceName.trim()) return;
+    setWorkspaceBusy(true);
+    try {
+      const workspace = await createWorkspace(workspaceName.trim());
+      if (workspace?.id) setWorkspaceName("");
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  }
+
+  async function submitInviteCode() {
+    if (!inviteCode.trim()) return;
+    setWorkspaceBusy(true);
+    try {
+      const workspace = await joinWorkspace(inviteCode.trim());
+      if (workspace?.id) setInviteCode("");
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  }
   const highTasks = activeTasks.filter((task) => task.priority === "High");
   const nextMeeting = meetings[0];
   const greetingName = getGreetingName(profile?.fullName);
@@ -73,6 +107,101 @@ export function HomeScreen({ onNavigate }) {
             </TouchableOpacity>
           ))}
         </View>
+
+        <SectionTitle title="Workspace" />
+        <GlowCard elevated style={styles.workspacePanel}>
+          <View style={styles.workspaceHeader}>
+            <View style={styles.workspaceHeaderCopy}>
+              <Text style={styles.workspaceTitle}>
+                {workspaceMode ? activeWorkspace.name : "Personal"}
+              </Text>
+              <Text style={styles.workspaceSubtext}>
+                {workspaceMode
+                  ? "Shared tasks, meetings, and reminders with your team."
+                  : "Your tasks, meetings, and reminders stay private."}
+              </Text>
+            </View>
+            <StatusPill
+              status={workspaceMode ? "stable" : "neutral"}
+              label={workspaceMode ? activeWorkspace.role : "Personal"}
+            />
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.workspaceChips}
+          >
+            {workspaces.map((workspace) => (
+              <TouchableOpacity
+                key={workspace.id}
+                activeOpacity={0.84}
+                style={[
+                  styles.workspaceChip,
+                  activeWorkspaceId === workspace.id && styles.workspaceChipActive,
+                ]}
+                onPress={() => selectWorkspace(workspace.id)}
+              >
+                <Ionicons
+                  name={workspace.type === "team" ? "people-outline" : "person-outline"}
+                  size={15}
+                  color={activeWorkspaceId === workspace.id ? colors.white : colors.text}
+                />
+                <Text
+                  style={[
+                    styles.workspaceChipText,
+                    activeWorkspaceId === workspace.id && styles.workspaceChipTextActive,
+                  ]}
+                >
+                  {workspace.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          {workspaceMode && activeWorkspace.inviteCode ? (
+            <Text style={styles.workspaceCode}>
+              Invite code: {activeWorkspace.inviteCode}
+            </Text>
+          ) : null}
+          <View style={styles.workspaceActions}>
+            <WorkspaceField
+              colors={colors}
+              styles={styles}
+              placeholder="New workspace name"
+              value={workspaceName}
+              onChangeText={setWorkspaceName}
+            />
+            <TouchableOpacity
+              activeOpacity={0.86}
+              disabled={workspaceBusy}
+              style={[styles.workspaceButton, workspaceBusy && styles.workspaceButtonDisabled]}
+              onPress={submitWorkspace}
+            >
+              <Ionicons name="briefcase-outline" size={16} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.workspaceActions}>
+            <WorkspaceField
+              colors={colors}
+              styles={styles}
+              placeholder="Invite code"
+              value={inviteCode}
+              onChangeText={setInviteCode}
+              autoCapitalize="characters"
+            />
+            <TouchableOpacity
+              activeOpacity={0.86}
+              disabled={workspaceBusy}
+              style={[styles.workspaceButton, workspaceBusy && styles.workspaceButtonDisabled]}
+              onPress={submitInviteCode}
+            >
+              <Ionicons name="enter-outline" size={16} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+          {workspaceStatus &&
+          !["personal", "connected", "loading"].includes(String(workspaceStatus)) ? (
+            <Text style={styles.workspaceStatusText}>{workspaceStatus}</Text>
+          ) : null}
+        </GlowCard>
 
         <SectionTitle title="Today" />
         <View style={styles.metricGrid}>
@@ -139,6 +268,16 @@ export function HomeScreen({ onNavigate }) {
         </GlowCard>
       </View>
     </ScrollView>
+  );
+}
+
+function WorkspaceField({ colors, styles, ...props }) {
+  return (
+    <TextInput
+      placeholderTextColor={colors.textMuted}
+      style={[styles.workspaceField]}
+      {...props}
+    />
   );
 }
 
@@ -243,6 +382,91 @@ function createStyles({ colors, radii, spacing, type }, layout) {
     metricLabel: {
       ...type.caption,
       marginTop: spacing.xs,
+    },
+    workspacePanel: {
+      gap: spacing.md,
+      marginBottom: spacing.lg,
+    },
+    workspaceHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: spacing.md,
+    },
+    workspaceHeaderCopy: {
+      flex: 1,
+      gap: spacing.xs,
+    },
+    workspaceTitle: {
+      ...type.h2,
+    },
+    workspaceSubtext: {
+      ...type.body,
+    },
+    workspaceChips: {
+      gap: spacing.sm,
+      paddingRight: spacing.md,
+    },
+    workspaceChip: {
+      minHeight: 38,
+      borderRadius: radii.pill,
+      paddingHorizontal: spacing.md,
+      borderWidth: 1,
+      borderColor: colors.glassBorder,
+      backgroundColor: colors.glassSurface,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+    },
+    workspaceChipActive: {
+      backgroundColor: colors.blue,
+      borderColor: colors.glassBorderStrong,
+    },
+    workspaceChipText: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: "800",
+    },
+    workspaceChipTextActive: {
+      color: colors.white,
+    },
+    workspaceCode: {
+      ...type.caption,
+      color: colors.electric,
+    },
+    workspaceActions: {
+      flexDirection: "row",
+      gap: spacing.sm,
+      alignItems: "center",
+    },
+    workspaceField: {
+      flex: 1,
+      minHeight: 48,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: colors.glassBorder,
+      backgroundColor: colors.input,
+      paddingHorizontal: spacing.md,
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: "600",
+    },
+    workspaceButton: {
+      width: 48,
+      minHeight: 48,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: colors.glassBorder,
+      backgroundColor: colors.glassSurface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    workspaceButtonDisabled: {
+      opacity: 0.7,
+    },
+    workspaceStatusText: {
+      ...type.caption,
+      color: colors.amber,
     },
     nextCard: {
       gap: spacing.sm,

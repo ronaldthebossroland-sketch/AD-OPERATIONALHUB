@@ -8,6 +8,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+
 import { Ionicons } from "@expo/vector-icons";
 import { GlowCard } from "../components/GlowCard";
 import { ScreenHeader } from "../components/ScreenHeader";
@@ -24,14 +25,8 @@ export function TasksScreen() {
     completedTasks,
     addTask,
     updateTaskStatus,
-    workspaces,
     activeWorkspace,
-    activeWorkspaceId,
     workspaceMode,
-    workspaceStatus,
-    selectWorkspace,
-    createWorkspace,
-    joinWorkspace,
   } = useEVAApp();
   const { width } = useWindowDimensions();
   const compact = width < 390;
@@ -41,9 +36,6 @@ export function TasksScreen() {
   const [detail, setDetail] = useState("");
   const [priority, setPriority] = useState("High");
   const [showCompleted, setShowCompleted] = useState(false);
-  const [workspaceName, setWorkspaceName] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
-  const [workspaceBusy, setWorkspaceBusy] = useState(false);
 
   function submitTask() {
     if (!title.trim()) {
@@ -60,136 +52,10 @@ export function TasksScreen() {
     setPriority("High");
   }
 
-  async function submitWorkspace() {
-    if (!workspaceName.trim()) {
-      return;
-    }
-
-    setWorkspaceBusy(true);
-    try {
-      const workspace = await createWorkspace(workspaceName.trim());
-      if (workspace?.id) {
-        setWorkspaceName("");
-      }
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  }
-
-  async function submitInviteCode() {
-    if (!inviteCode.trim()) {
-      return;
-    }
-
-    setWorkspaceBusy(true);
-    try {
-      const workspace = await joinWorkspace(inviteCode.trim());
-      if (workspace?.id) {
-        setInviteCode("");
-      }
-    } finally {
-      setWorkspaceBusy(false);
-    }
-  }
-
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
       <ScreenHeader title="Tasks" subtitle="Execution items and follow-up actions" eyebrow="Action Layer" />
       <View style={styles.padded}>
-        <GlowCard elevated style={styles.workspacePanel}>
-          <View style={styles.workspaceHeader}>
-            <View>
-              <Text style={styles.formTitle}>Workspace</Text>
-              <Text style={styles.workspaceSubtext}>
-                {workspaceMode
-                  ? `${activeWorkspace.name} tasks are shared with the team.`
-                  : "Personal EVA tasks stay private to you."}
-              </Text>
-            </View>
-            <StatusPill
-              status={workspaceMode ? "stable" : "neutral"}
-              label={workspaceMode ? activeWorkspace.role : "Personal"}
-            />
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.workspaceChips}
-          >
-            {workspaces.map((workspace) => (
-              <TouchableOpacity
-                key={workspace.id}
-                activeOpacity={0.84}
-                style={[
-                  styles.workspaceChip,
-                  activeWorkspaceId === workspace.id && styles.workspaceChipActive,
-                ]}
-                onPress={() => selectWorkspace(workspace.id)}
-              >
-                <Ionicons
-                  name={workspace.type === "team" ? "people-outline" : "person-outline"}
-                  size={15}
-                  color={activeWorkspaceId === workspace.id ? colors.white : colors.text}
-                />
-                <Text
-                  style={[
-                    styles.workspaceChipText,
-                    activeWorkspaceId === workspace.id && styles.workspaceChipTextActive,
-                  ]}
-                >
-                  {workspace.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          {workspaceMode && activeWorkspace.inviteCode ? (
-            <Text style={styles.workspaceCode}>
-              Invite code: {activeWorkspace.inviteCode}
-            </Text>
-          ) : null}
-          <View style={styles.workspaceActions}>
-            <Field
-              styles={styles}
-              colors={colors}
-              placeholder="New workspace name"
-              value={workspaceName}
-              onChangeText={setWorkspaceName}
-              style={styles.workspaceField}
-            />
-            <TouchableOpacity
-              activeOpacity={0.86}
-              disabled={workspaceBusy}
-              style={[styles.secondaryButton, workspaceBusy && styles.secondaryButtonDisabled]}
-              onPress={submitWorkspace}
-            >
-              <Ionicons name="briefcase-outline" size={16} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.workspaceActions}>
-            <Field
-              styles={styles}
-              colors={colors}
-              placeholder="Invite code"
-              value={inviteCode}
-              onChangeText={setInviteCode}
-              autoCapitalize="characters"
-              style={styles.workspaceField}
-            />
-            <TouchableOpacity
-              activeOpacity={0.86}
-              disabled={workspaceBusy}
-              style={[styles.secondaryButton, workspaceBusy && styles.secondaryButtonDisabled]}
-              onPress={submitInviteCode}
-            >
-              <Ionicons name="enter-outline" size={16} color={colors.text} />
-            </TouchableOpacity>
-          </View>
-          {workspaceStatus &&
-          !["personal", "connected", "loading"].includes(String(workspaceStatus)) ? (
-            <Text style={styles.workspaceStatus}>{workspaceStatus}</Text>
-          ) : null}
-        </GlowCard>
-
         <GlowCard elevated style={styles.form}>
           <Text style={styles.formTitle}>Create task</Text>
           <Field styles={styles} colors={colors} placeholder="Task title" value={title} onChangeText={setTitle} />
@@ -330,77 +196,6 @@ function createStyles({ colors, radii, spacing, type }, compact) {
     },
     padded: {
       paddingHorizontal: compact ? spacing.lg : spacing.xl,
-    },
-    workspacePanel: {
-      gap: spacing.md,
-      marginBottom: spacing.lg,
-    },
-    workspaceHeader: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      gap: spacing.md,
-      alignItems: "flex-start",
-    },
-    workspaceSubtext: {
-      ...type.body,
-      marginTop: spacing.xs,
-      maxWidth: compact ? 230 : 520,
-    },
-    workspaceChips: {
-      gap: spacing.sm,
-      paddingRight: spacing.md,
-    },
-    workspaceChip: {
-      minHeight: 38,
-      borderRadius: radii.pill,
-      paddingHorizontal: spacing.md,
-      borderWidth: 1,
-      borderColor: colors.glassBorder,
-      backgroundColor: colors.glassSurface,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.xs,
-    },
-    workspaceChipActive: {
-      backgroundColor: colors.blue,
-      borderColor: colors.glassBorderStrong,
-    },
-    workspaceChipText: {
-      color: colors.text,
-      fontSize: 12,
-      fontWeight: "800",
-    },
-    workspaceChipTextActive: {
-      color: colors.white,
-    },
-    workspaceCode: {
-      ...type.caption,
-      color: colors.electric,
-    },
-    workspaceActions: {
-      flexDirection: "row",
-      gap: spacing.sm,
-      alignItems: "center",
-    },
-    workspaceField: {
-      flex: 1,
-    },
-    secondaryButton: {
-      width: 48,
-      minHeight: 48,
-      borderRadius: radii.lg,
-      borderWidth: 1,
-      borderColor: colors.glassBorder,
-      backgroundColor: colors.glassSurface,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    secondaryButtonDisabled: {
-      opacity: 0.7,
-    },
-    workspaceStatus: {
-      ...type.caption,
-      color: colors.amber,
     },
     form: {
       gap: spacing.md,

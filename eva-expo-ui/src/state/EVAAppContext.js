@@ -225,6 +225,24 @@ export function EVAAppProvider({ children }) {
     () => visibleTasks.filter((task) => task.status === "Done"),
     [visibleTasks]
   );
+  const visibleMeetings = useMemo(
+    () =>
+      meetings.filter((meeting) =>
+        workspaceMode
+          ? meeting.workspaceId === activeWorkspaceId
+          : !meeting.workspaceId
+      ),
+    [activeWorkspaceId, meetings, workspaceMode]
+  );
+  const visibleReminders = useMemo(
+    () =>
+      reminders.filter((reminder) =>
+        workspaceMode
+          ? reminder.workspaceId === activeWorkspaceId
+          : !reminder.workspaceId
+      ),
+    [activeWorkspaceId, reminders, workspaceMode]
+  );
 
   const resetWorkspaceForUserLoad = useCallback((activeUser) => {
     setProfileState(getProfileFallback(activeUser));
@@ -492,7 +510,7 @@ export function EVAAppProvider({ children }) {
     let refreshTimer = null;
     const activeUserId = currentUser.id;
 
-    const refreshWorkspaceTasks = () => {
+    const refreshWorkspaceData = () => {
       if (refreshTimer) {
         clearTimeout(refreshTimer);
       }
@@ -503,7 +521,33 @@ export function EVAAppProvider({ children }) {
             if (!isMounted) {
               return;
             }
-            setTasks(Array.isArray(data.tasks) ? data.tasks : []);
+            // Merge incoming Supabase data with any locally-pending optimistic records
+            // so a realtime event from another member doesn't wipe out records the
+            // current user just created but Supabase hasn't confirmed yet.
+            setTasks((current) => {
+              const incoming = Array.isArray(data.tasks) ? data.tasks : [];
+              const incomingIds = new Set(incoming.map((t) => t.id));
+              const pendingLocal = current.filter(
+                (t) => isPendingLocalRecordId(t.id) && !incomingIds.has(t.id)
+              );
+              return [...pendingLocal, ...incoming];
+            });
+            setMeetings((current) => {
+              const incoming = Array.isArray(data.meetings) ? data.meetings : [];
+              const incomingIds = new Set(incoming.map((m) => m.id));
+              const pendingLocal = current.filter(
+                (m) => isPendingLocalRecordId(m.id) && !incomingIds.has(m.id)
+              );
+              return [...pendingLocal, ...incoming];
+            });
+            setReminders((current) => {
+              const incoming = Array.isArray(data.reminders) ? data.reminders : [];
+              const incomingIds = new Set(incoming.map((r) => r.id));
+              const pendingLocal = current.filter(
+                (r) => isPendingLocalRecordId(r.id) && !incomingIds.has(r.id)
+              );
+              return [...pendingLocal, ...incoming];
+            });
             setWorkspaces(normalizeLoadedWorkspaces(data.workspaces));
             setWorkspaceStatus("connected");
           })
@@ -517,7 +561,7 @@ export function EVAAppProvider({ children }) {
     };
 
     const channel = supabase
-      .channel(`eva-workspace-tasks-${activeWorkspaceId}`)
+      .channel(`eva-workspace-${activeWorkspaceId}`)
       .on(
         "postgres_changes",
         {
@@ -526,7 +570,27 @@ export function EVAAppProvider({ children }) {
           table: "tasks",
           filter: `workspace_id=eq.${activeWorkspaceId}`,
         },
-        refreshWorkspaceTasks
+        refreshWorkspaceData
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "meetings",
+          filter: `workspace_id=eq.${activeWorkspaceId}`,
+        },
+        refreshWorkspaceData
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "reminders",
+          filter: `workspace_id=eq.${activeWorkspaceId}`,
+        },
+        refreshWorkspaceData
       )
       .subscribe();
 
@@ -1391,6 +1455,7 @@ export function EVAAppProvider({ children }) {
       notificationId: "",
       reminderScheduled: false,
       reminderStatus: notificationEnabled ? "pending" : "off",
+      workspaceId: workspaceMode ? activeWorkspaceId : "",
     };
     debugEvaFlow("meeting: before saving", meeting);
     setMeetings((current) => {
@@ -1668,6 +1733,7 @@ export function EVAAppProvider({ children }) {
       notificationId: "",
       reminderScheduled: false,
       reminderStatus: notificationEnabled ? "pending" : "off",
+      workspaceId: workspaceMode ? activeWorkspaceId : "",
     };
     setReminders((current) => [reminder, ...current]);
 
@@ -1821,12 +1887,12 @@ export function EVAAppProvider({ children }) {
         reply = `Reminder set: ${reminder.title}, ${reminder.due}.`;
       }
     } else if (isScheduleQuestion(lower)) {
-      const nextMeeting = meetings[0];
+      const nextMeeting = visibleMeetings[0];
       reply = nextMeeting
-        ? `You have ${meetings.length} meeting${meetings.length === 1 ? "" : "s"} in EVA. The next one is ${nextMeeting.title} at ${nextMeeting.time}.`
+        ? `You have ${visibleMeetings.length} meeting${visibleMeetings.length === 1 ? "" : "s"} in EVA. The next one is ${nextMeeting.title} at ${nextMeeting.time}.`
         : "I do not see a meeting scheduled in EVA yet.";
     } else if (isPendingTasksQuestion(lower)) {
-      const pendingTasks = tasks.filter((task) => task.status !== "Done");
+      const pendingTasks = visibleTasks.filter((task) => task.status !== "Done");
       reply = pendingTasks.length
         ? `${pendingTasks.length} task${pendingTasks.length === 1 ? "" : "s"} need attention. Start with ${pendingTasks[0].title}.`
         : "Your EVA task list is clear right now.";
@@ -1839,7 +1905,7 @@ export function EVAAppProvider({ children }) {
       const result = await prepareMeetingBriefing({ title: content });
       reply = result.reply;
     } else if (/reschedule|move|shift/.test(lower)) {
-      const target = meetings[0];
+      const target = visibleMeetings[0];
       if (target) {
         const updated = rescheduleMeeting(target.id, {
           date: extractMeetingDate(content),
@@ -2003,7 +2069,7 @@ export function EVAAppProvider({ children }) {
     }
 
     if (actionType === "reschedule_meeting") {
-      const target = findMeetingForAction(action) || meetings[0];
+      const target = findMeetingForAction(action) || visibleMeetings[0];
       if (!target) {
         return "There is no meeting to reschedule yet. Ask me to create one first.";
       }
@@ -2049,13 +2115,13 @@ export function EVAAppProvider({ children }) {
         status,
         due,
       })),
-      meetings: meetings.slice(0, 10).map(({ title, date, time, attendees }) => ({
+      meetings: visibleMeetings.slice(0, 10).map(({ title, date, time, attendees }) => ({
         title,
         date,
         time,
         attendees,
       })),
-      reminders: reminders.slice(0, 10).map(({ title, due }) => ({
+      reminders: visibleReminders.slice(0, 10).map(({ title, due }) => ({
         title,
         due,
       })),
@@ -2089,7 +2155,7 @@ export function EVAAppProvider({ children }) {
     }
 
     return (
-      meetings.find((meeting) => meeting.title.toLowerCase().includes(title)) ||
+      visibleMeetings.find((meeting) => meeting.title.toLowerCase().includes(title)) ||
       null
     );
   }
@@ -2180,9 +2246,9 @@ export function EVAAppProvider({ children }) {
     tasks,
     activeTasks,
     completedTasks,
-    meetings,
+    meetings: visibleMeetings,
     documents,
-    reminders,
+    reminders: visibleReminders,
     chatMessages,
     addTask,
     updateTaskStatus,

@@ -19,6 +19,8 @@ export async function loadEvaSupabaseData(userId) {
     documentsResult,
     preferencesResult,
     workspaces,
+    workspaceMeetings,
+    workspaceReminders,
   ] =
     await Promise.all([
       supabase
@@ -59,6 +61,8 @@ export async function loadEvaSupabaseData(userId) {
         .limit(1)
         .maybeSingle(),
       loadSupabaseWorkspaces(activeUserId),
+      loadSupabaseWorkspaceMeetings(activeUserId),
+      loadSupabaseWorkspaceReminders(activeUserId),
     ]);
 
   throwIfError(tasksResult.error);
@@ -76,8 +80,12 @@ export async function loadEvaSupabaseData(userId) {
     tasks: dedupeRowsById([...(tasksResult.data || []), ...workspaceTasks])
       .filter(isVisibleEvaTask)
       .map(mapSupabaseTask),
-    meetings: (meetingsResult.data || []).filter(isVisibleEvaRecord).map(mapSupabaseMeeting),
-    reminders: (remindersResult.data || []).filter(isVisibleEvaRecord).map(mapSupabaseReminder),
+    meetings: dedupeRowsById([...(meetingsResult.data || []), ...workspaceMeetings])
+      .filter(isVisibleEvaRecord)
+      .map(mapSupabaseMeeting),
+    reminders: dedupeRowsById([...(remindersResult.data || []), ...workspaceReminders])
+      .filter(isVisibleEvaRecord)
+      .map(mapSupabaseReminder),
     documents: (documentsResult.data || []).filter(isVisibleEvaRecord).map(mapSupabaseDocument),
     preferences: mapSupabasePreferences(preferencesResult.data),
     workspaces,
@@ -395,6 +403,54 @@ async function loadSupabaseWorkspaceTasks(userId) {
     return Array.isArray(data) ? data : [];
   } catch (error) {
     console.warn("EVA workspace task sync is unavailable.", error?.message || error);
+    return [];
+  }
+}
+
+async function loadSupabaseWorkspaceMeetings(userId) {
+  requireUserId(userId);
+
+  try {
+    const { data, error } = await supabase
+      .from("meetings")
+      .select("*")
+      .eq("app_source", APP_SOURCE)
+      .not("workspace_id", "is", null)
+      .gte("created_at", EVA_CLEAN_DATA_CUTOFF)
+      .order("created_at", { ascending: false });
+
+    if (isMissingColumnError(error)) {
+      return [];
+    }
+
+    throwIfError(error);
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.warn("EVA workspace meeting sync is unavailable.", error?.message || error);
+    return [];
+  }
+}
+
+async function loadSupabaseWorkspaceReminders(userId) {
+  requireUserId(userId);
+
+  try {
+    const { data, error } = await supabase
+      .from("reminders")
+      .select("*")
+      .eq("app_source", APP_SOURCE)
+      .not("workspace_id", "is", null)
+      .gte("created_at", EVA_CLEAN_DATA_CUTOFF)
+      .order("created_at", { ascending: false });
+
+    if (isMissingColumnError(error)) {
+      return [];
+    }
+
+    throwIfError(error);
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.warn("EVA workspace reminder sync is unavailable.", error?.message || error);
     return [];
   }
 }
@@ -825,6 +881,9 @@ function meetingPayload(meeting = {}) {
     payload.reminder_status =
       meeting.reminderStatus || meeting.reminder_status || "not_scheduled";
   }
+  if (meeting.workspaceId !== undefined || meeting.workspace_id !== undefined) {
+    payload.workspace_id = meeting.workspaceId || meeting.workspace_id || null;
+  }
 
   return payload;
 }
@@ -865,6 +924,9 @@ function reminderPayload(reminder = {}) {
   if (reminder.reminderStatus !== undefined || reminder.reminder_status !== undefined) {
     payload.reminder_status =
       reminder.reminderStatus || reminder.reminder_status || "not_scheduled";
+  }
+  if (reminder.workspaceId !== undefined || reminder.workspace_id !== undefined) {
+    payload.workspace_id = reminder.workspaceId || reminder.workspace_id || null;
   }
 
   return payload;
@@ -1129,6 +1191,7 @@ function mapSupabaseMeeting(row) {
     notificationId: row.notification_id || "",
     reminderScheduled: row.reminder_scheduled ?? false,
     reminderStatus: row.reminder_status || "not_scheduled",
+    workspaceId: row.workspace_id || "",
   };
 }
 
@@ -1149,6 +1212,7 @@ function mapSupabaseReminder(row, fallback = {}) {
       row.reminder_scheduled ?? fallback.reminderScheduled ?? false,
     reminderStatus:
       row.reminder_status || fallback.reminderStatus || "not_scheduled",
+    workspaceId: row.workspace_id || "",
   };
 }
 

@@ -499,6 +499,9 @@ alter table public.tasks add column if not exists workspace_id uuid references p
 alter table public.tasks add column if not exists created_by uuid references auth.users(id) on delete set null;
 alter table public.tasks add column if not exists assigned_to uuid references auth.users(id) on delete set null;
 
+alter table public.meetings add column if not exists workspace_id uuid references public.eva_workspaces(id) on delete set null;
+alter table public.reminders add column if not exists workspace_id uuid references public.eva_workspaces(id) on delete set null;
+
 create or replace function public.eva_workspace_role(workspace uuid)
 returns text
 language sql
@@ -643,6 +646,74 @@ for delete to authenticated using (
   and public.eva_workspace_can_admin(workspace_id)
 );
 
+drop policy if exists eva_meetings_select_workspace_member on public.meetings;
+drop policy if exists eva_meetings_insert_workspace_member on public.meetings;
+drop policy if exists eva_meetings_update_workspace_member on public.meetings;
+drop policy if exists eva_meetings_delete_workspace_admin on public.meetings;
+create policy eva_meetings_select_workspace_member on public.meetings
+for select to authenticated using (
+  app_source = 'eva'
+  and workspace_id is not null
+  and public.eva_workspace_is_member(workspace_id)
+);
+create policy eva_meetings_insert_workspace_member on public.meetings
+for insert to authenticated with check (
+  app_source = 'eva'
+  and workspace_id is not null
+  and user_id = auth.uid()
+  and public.eva_workspace_can_edit(workspace_id)
+);
+create policy eva_meetings_update_workspace_member on public.meetings
+for update to authenticated using (
+  app_source = 'eva'
+  and workspace_id is not null
+  and public.eva_workspace_can_edit(workspace_id)
+) with check (
+  app_source = 'eva'
+  and workspace_id is not null
+  and public.eva_workspace_can_edit(workspace_id)
+);
+create policy eva_meetings_delete_workspace_admin on public.meetings
+for delete to authenticated using (
+  app_source = 'eva'
+  and workspace_id is not null
+  and public.eva_workspace_can_admin(workspace_id)
+);
+
+drop policy if exists eva_reminders_select_workspace_member on public.reminders;
+drop policy if exists eva_reminders_insert_workspace_member on public.reminders;
+drop policy if exists eva_reminders_update_workspace_member on public.reminders;
+drop policy if exists eva_reminders_delete_workspace_admin on public.reminders;
+create policy eva_reminders_select_workspace_member on public.reminders
+for select to authenticated using (
+  app_source = 'eva'
+  and workspace_id is not null
+  and public.eva_workspace_is_member(workspace_id)
+);
+create policy eva_reminders_insert_workspace_member on public.reminders
+for insert to authenticated with check (
+  app_source = 'eva'
+  and workspace_id is not null
+  and user_id = auth.uid()
+  and public.eva_workspace_can_edit(workspace_id)
+);
+create policy eva_reminders_update_workspace_member on public.reminders
+for update to authenticated using (
+  app_source = 'eva'
+  and workspace_id is not null
+  and public.eva_workspace_can_edit(workspace_id)
+) with check (
+  app_source = 'eva'
+  and workspace_id is not null
+  and public.eva_workspace_can_edit(workspace_id)
+);
+create policy eva_reminders_delete_workspace_admin on public.reminders
+for delete to authenticated using (
+  app_source = 'eva'
+  and workspace_id is not null
+  and public.eva_workspace_can_admin(workspace_id)
+);
+
 drop function if exists public.join_eva_workspace_by_code(text);
 drop function if exists public.join_eva_workspace_by_code(text, text);
 
@@ -757,10 +828,32 @@ create index if not exists eva_workspace_members_user_idx
 on public.eva_workspace_members (user_id, app_source, status);
 create index if not exists tasks_workspace_idx
 on public.tasks (workspace_id, app_source, created_at desc);
+create index if not exists meetings_workspace_idx
+on public.meetings (workspace_id, app_source, created_at desc);
+create index if not exists reminders_workspace_idx
+on public.reminders (workspace_id, app_source, created_at desc);
 
 do $$
 begin
   alter publication supabase_realtime add table public.tasks;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end;
+$$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.meetings;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end;
+$$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.reminders;
 exception
   when duplicate_object then null;
   when undefined_object then null;

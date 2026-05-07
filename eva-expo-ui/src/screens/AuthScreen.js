@@ -340,15 +340,26 @@ function ForgotMode({ busy, colors, email, onBack, onSubmit, setEmail, styles })
   );
 }
 
-function Field({ colors, icon, styles, ...props }) {
+function Field({ colors, icon, secureTextEntry, styles, ...props }) {
+  const [visible, setVisible] = useState(false);
   return (
     <View style={styles.fieldWrap}>
       <Ionicons name={icon} size={18} color={colors.electric} />
       <TextInput
         placeholderTextColor={colors.textMuted}
+        secureTextEntry={secureTextEntry && !visible}
         style={styles.field}
         {...props}
       />
+      {secureTextEntry ? (
+        <TouchableOpacity activeOpacity={0.7} onPress={() => setVisible((v) => !v)}>
+          <Ionicons
+            name={visible ? "eye-outline" : "eye-off-outline"}
+            size={18}
+            color={colors.textMuted}
+          />
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
