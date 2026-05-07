@@ -14,6 +14,14 @@ import { useEVAApp } from "../state/EVAAppContext";
 const tutorialSteps = [
   {
     tab: "home",
+    icon: "sparkles",
+    eyebrow: "Welcome",
+    title: "Meet EVA",
+    body: "EVA is your AI executive assistant. She handles briefings, tasks, meetings, and reminders — so you can stay focused on what matters. This tour takes less than a minute.",
+    action: "Get started",
+  },
+  {
+    tab: "home",
     icon: "home-outline",
     eyebrow: "Command Center",
     title: "Start here",
@@ -37,6 +45,14 @@ const tutorialSteps = [
     action: "Open Tasks",
   },
   {
+    tab: "tasks",
+    icon: "people-outline",
+    eyebrow: "Workspace",
+    title: "Switch between personal and team work",
+    body: "Use the Workspace panel in Tasks to keep private work in Personal EVA or share task plans with a team workspace.",
+    action: "Open Tasks",
+  },
+  {
     tab: "calendar",
     icon: "calendar-outline",
     eyebrow: "Time",
@@ -57,7 +73,7 @@ const tutorialSteps = [
     icon: "settings-outline",
     eyebrow: "Control",
     title: "Tune EVA for you",
-    body: "Settings lets you update your profile, appearance, calendar behavior, reminders, and voice preferences.",
+    body: "Settings lets you update your profile, manage workspace members, adjust calendar behavior, reminders, and voice preferences.",
     action: "Open Settings",
   },
 ];
@@ -128,7 +144,7 @@ export function OnboardingTutorial({ visible, onComplete, onNavigate }) {
           <View style={styles.dots}>
             {tutorialSteps.map((item, index) => (
               <View
-                key={item.tab}
+                key={index}
                 style={[styles.dot, index === stepIndex && styles.activeDot]}
               />
             ))}

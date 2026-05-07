@@ -23,11 +23,15 @@ import {
   createSupabaseMeeting,
   createSupabaseReminder,
   createSupabaseTask,
+  createSupabaseWorkspace,
   deleteSupabaseMeeting,
   isEvaSupabaseConfigured,
+  joinSupabaseWorkspace,
   loadEvaSupabaseData,
+  loadSupabaseWorkspaceMembers,
   saveSupabaseProfile,
   saveSupabasePreferences,
+  updateSupabaseWorkspaceMemberRole,
   updateSupabaseMeeting,
   updateSupabaseTask,
 } from "../lib/evaSupabaseStore";
@@ -51,6 +55,7 @@ import {
   scheduleTaskReminder,
   scheduleTestNotification,
 } from "../lib/deviceNotifications";
+import { resolveMeetingDateRange } from "../lib/meetingDateTime";
 import { makeTheme } from "../theme";
 
 export const EVA_TUTORIAL_COMPLETE_KEY = "eva:onboarding:tutorial-complete:v1";
@@ -132,6 +137,16 @@ const defaultProfile = {
   role: "Personal workspace",
 };
 
+export const PERSONAL_WORKSPACE_ID = "personal";
+
+const personalWorkspace = {
+  id: PERSONAL_WORKSPACE_ID,
+  name: "Personal EVA",
+  role: "owner",
+  type: "personal",
+  inviteCode: "",
+};
+
 const DEBUG_EVA_FLOW = process.env.EXPO_PUBLIC_EVA_DEBUG === "true";
 const initialRecordIds = {
   tasks: new Set(initialTasks.map((item) => item.id)),
@@ -162,6 +177,11 @@ export function EVAAppProvider({ children }) {
     useState("not_connected");
   const [deviceIntegrationWarning, setDeviceIntegrationWarning] = useState("");
   const [profile, setProfileState] = useState(defaultProfile);
+  const [workspaces, setWorkspaces] = useState([personalWorkspace]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(PERSONAL_WORKSPACE_ID);
+  const [workspaceStatus, setWorkspaceStatus] = useState("personal");
+  const [workspaceMembers, setWorkspaceMembers] = useState([]);
+  const [workspaceMemberStatus, setWorkspaceMemberStatus] = useState("personal");
   const [tasks, setTasks] = useState(initialTasks);
   const [meetings, setMeetings] = useState(initialMeetings);
   const [documents, setDocuments] = useState(initialDocuments);
@@ -179,17 +199,40 @@ export function EVAAppProvider({ children }) {
   );
   const [syncWarning, setSyncWarning] = useState("");
   const theme = useMemo(() => makeTheme(themeMode), [themeMode]);
+  const activeWorkspace = useMemo(
+    () =>
+      workspaces.find((workspace) => workspace.id === activeWorkspaceId) ||
+      personalWorkspace,
+    [activeWorkspaceId, workspaces]
+  );
+  const workspaceMode = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
+  const canManageWorkspace = workspaceMode &&
+    ["owner", "admin"].includes(String(activeWorkspace.role || "").toLowerCase());
+  const visibleTasks = useMemo(
+    () =>
+      tasks.filter((task) =>
+        workspaceMode
+          ? task.workspaceId === activeWorkspaceId
+          : !task.workspaceId
+      ),
+    [activeWorkspaceId, tasks, workspaceMode]
+  );
   const activeTasks = useMemo(
-    () => tasks.filter((task) => task.status !== "Done"),
-    [tasks]
+    () => visibleTasks.filter((task) => task.status !== "Done"),
+    [visibleTasks]
   );
   const completedTasks = useMemo(
-    () => tasks.filter((task) => task.status === "Done"),
-    [tasks]
+    () => visibleTasks.filter((task) => task.status === "Done"),
+    [visibleTasks]
   );
 
   const resetWorkspaceForUserLoad = useCallback((activeUser) => {
     setProfileState(getProfileFallback(activeUser));
+    setWorkspaces([personalWorkspace]);
+    setActiveWorkspaceId(PERSONAL_WORKSPACE_ID);
+    setWorkspaceStatus("loading");
+    setWorkspaceMembers([]);
+    setWorkspaceMemberStatus("loading");
     setTasks([]);
     setMeetings([]);
     setDocuments([]);
@@ -201,12 +244,11 @@ export function EVAAppProvider({ children }) {
 
   const resetWorkspaceForSignedOut = useCallback(() => {
     setProfileState(defaultProfile);
-    setThemeMode("dark");
-    setAiBehaviorState("executive");
-    setVoiceModeState("calm");
-    setNotificationEnabledState(true);
-    setPhoneCalendarSyncEnabledState(false);
-    setDefaultMeetingReminderMinutesState(15);
+    setWorkspaces([personalWorkspace]);
+    setActiveWorkspaceId(PERSONAL_WORKSPACE_ID);
+    setWorkspaceStatus("personal");
+    setWorkspaceMembers([]);
+    setWorkspaceMemberStatus("personal");
     setTasks(initialTasks);
     setMeetings(initialMeetings);
     setDocuments(initialDocuments);
@@ -344,6 +386,14 @@ export function EVAAppProvider({ children }) {
         setRemoteEnabled(true);
         setSyncStatus("connected");
         setSyncWarning("");
+        const remoteWorkspaces = normalizeLoadedWorkspaces(data.workspaces);
+        setWorkspaces(remoteWorkspaces);
+        setWorkspaceStatus(remoteWorkspaces.length > 1 ? "connected" : "personal");
+        setActiveWorkspaceId((current) =>
+          remoteWorkspaces.some((workspace) => workspace.id === current)
+            ? current
+            : PERSONAL_WORKSPACE_ID
+        );
         setTasks((current) =>
           mergeRemoteWithPendingLocal(
             Array.isArray(data.tasks) ? data.tasks : [],
@@ -417,6 +467,7 @@ export function EVAAppProvider({ children }) {
 
         setRemoteEnabled(false);
         setSyncStatus("unavailable");
+        setWorkspaceStatus("unavailable");
         setSyncWarning("Local Mode is active because Supabase could not be reached.");
         console.warn("EVA Supabase bootstrap failed.", error?.message || error);
       });
@@ -428,12 +479,107 @@ export function EVAAppProvider({ children }) {
   }, [currentUser?.id, resetWorkspaceForUserLoad]);
 
   useEffect(() => {
+    if (
+      !remoteEnabled ||
+      !currentUser?.id ||
+      !supabase ||
+      activeWorkspaceId === PERSONAL_WORKSPACE_ID
+    ) {
+      return undefined;
+    }
+
+    let isMounted = true;
+    let refreshTimer = null;
+    const activeUserId = currentUser.id;
+
+    const refreshWorkspaceTasks = () => {
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+      }
+
+      refreshTimer = setTimeout(() => {
+        loadEvaSupabaseData(activeUserId)
+          .then((data) => {
+            if (!isMounted) {
+              return;
+            }
+            setTasks(Array.isArray(data.tasks) ? data.tasks : []);
+            setWorkspaces(normalizeLoadedWorkspaces(data.workspaces));
+            setWorkspaceStatus("connected");
+          })
+          .catch((error) => {
+            if (isMounted) {
+              setWorkspaceStatus("unavailable");
+              console.warn("EVA workspace realtime refresh failed.", error?.message || error);
+            }
+          });
+      }, 350);
+    };
+
+    const channel = supabase
+      .channel(`eva-workspace-tasks-${activeWorkspaceId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "tasks",
+          filter: `workspace_id=eq.${activeWorkspaceId}`,
+        },
+        refreshWorkspaceTasks
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+      }
+      supabase.removeChannel?.(channel);
+    };
+  }, [activeWorkspaceId, currentUser?.id, remoteEnabled]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (
+      !remoteEnabled ||
+      !currentUser?.id ||
+      activeWorkspaceId === PERSONAL_WORKSPACE_ID
+    ) {
+      Promise.resolve().then(() => {
+        if (!isMounted) {
+          return;
+        }
+        setWorkspaceMembers([]);
+        setWorkspaceMemberStatus(
+          activeWorkspaceId === PERSONAL_WORKSPACE_ID ? "personal" : "unavailable"
+        );
+      });
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    Promise.resolve().then(() => {
+      if (isMounted) {
+        refreshWorkspaceMembers();
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId, currentUser?.id, remoteEnabled]);
+
+  useEffect(() => {
     let removeListener = () => {};
     addNotificationResponseListener((response) => {
       const data = response?.notification?.request?.content?.data || {};
       if (data.type === "reminder" && data.reminderId) {
         setReminders((current) =>
-          current.map((r) => r.id === data.reminderId ? { ...r, status: "done" } : r)
+          current.map((r) => r.id === data.reminderId ? { ...r, status: "completed" } : r)
         );
       } else if (data.type === "task" && data.taskId) {
         setTasks((current) =>
@@ -620,6 +766,8 @@ export function EVAAppProvider({ children }) {
       defaultMeetingReminderMinutes:
         patch.defaultMeetingReminderMinutes ?? defaultMeetingReminderMinutes,
     };
+
+    if (!currentUser?.id) return;
 
     syncMutation(
       "preferences",
@@ -951,6 +1099,9 @@ export function EVAAppProvider({ children }) {
     };
 
     setProfileState(updatedProfile);
+
+    if (!currentUser?.id) return;
+
     syncMutation(
       "profile",
       () => saveSupabaseProfile(updatedProfile, currentUser.id),
@@ -962,7 +1113,164 @@ export function EVAAppProvider({ children }) {
     );
   }
 
+  function selectWorkspace(workspaceId) {
+    const targetId = String(workspaceId || PERSONAL_WORKSPACE_ID);
+    const exists = workspaces.some((workspace) => workspace.id === targetId);
+    setActiveWorkspaceId(exists ? targetId : PERSONAL_WORKSPACE_ID);
+  }
+
+  async function refreshWorkspaceMembers() {
+    if (
+      !remoteEnabled ||
+      !currentUser?.id ||
+      activeWorkspaceId === PERSONAL_WORKSPACE_ID
+    ) {
+      setWorkspaceMembers([]);
+      setWorkspaceMemberStatus("personal");
+      return [];
+    }
+
+    setWorkspaceMemberStatus("loading");
+
+    try {
+      const members = await loadSupabaseWorkspaceMembers(
+        activeWorkspaceId,
+        currentUser.id
+      );
+      setWorkspaceMembers(members);
+      setWorkspaceMemberStatus("connected");
+      return members;
+    } catch (error) {
+      const message =
+        error?.message || "Workspace members could not be loaded.";
+      setWorkspaceMemberStatus(message);
+      console.warn("EVA workspace member load failed.", message);
+      return [];
+    }
+  }
+
+  async function updateWorkspaceMemberRole(memberId, role) {
+    if (!canManageWorkspace) {
+      setWorkspaceMemberStatus("Only workspace admins can manage member roles.");
+      return null;
+    }
+
+    const targetRole = normalizeWorkspaceRole(role);
+    const member = workspaceMembers.find((item) => item.id === memberId);
+
+    if (!member) {
+      setWorkspaceMemberStatus("Workspace member was not found.");
+      return null;
+    }
+    if (member.role === "owner") {
+      setWorkspaceMemberStatus("The workspace owner role cannot be changed here.");
+      return null;
+    }
+    if (targetRole === "owner") {
+      setWorkspaceMemberStatus("Use admin for shared management. Ownership stays with the creator.");
+      return null;
+    }
+
+    setWorkspaceMemberStatus("updating");
+
+    try {
+      const updated = await updateSupabaseWorkspaceMemberRole(
+        memberId,
+        targetRole,
+        activeWorkspaceId,
+        currentUser.id
+      );
+      setWorkspaceMembers((current) =>
+        current.map((item) => (item.id === memberId ? updated : item))
+      );
+      setWorkspaceMemberStatus("connected");
+      return updated;
+    } catch (error) {
+      const message = error?.message || "Could not update that member role.";
+      setWorkspaceMemberStatus(message);
+      console.warn("EVA workspace role update failed.", message);
+      return null;
+    }
+  }
+
+  async function createWorkspace(name) {
+    const workspaceName = String(name || "").trim();
+    if (!workspaceName) {
+      setWorkspaceStatus("Enter a workspace name.");
+      return null;
+    }
+    if (!remoteEnabled || !currentUser?.id) {
+      setWorkspaceStatus("Sign in and connect Supabase before creating a workspace.");
+      return null;
+    }
+
+    setWorkspaceStatus("creating");
+
+    try {
+      const workspace = await createSupabaseWorkspace(
+        { name: workspaceName, memberName: profile.fullName || currentUser.email },
+        currentUser.id
+      );
+      setWorkspaces((current) =>
+        normalizeLoadedWorkspaces([
+          ...current.filter((item) => item.id !== workspace.id),
+          workspace,
+        ])
+      );
+      setActiveWorkspaceId(workspace.id);
+      setWorkspaceStatus("connected");
+      return workspace;
+    } catch (error) {
+      const message =
+        error?.message ||
+        "Workspace could not be created. Make sure the workspace migration has been run.";
+      setWorkspaceStatus(message);
+      console.warn("EVA workspace create failed.", message);
+      return null;
+    }
+  }
+
+  async function joinWorkspace(inviteCode) {
+    const code = String(inviteCode || "").trim();
+    if (!code) {
+      setWorkspaceStatus("Enter an invite code.");
+      return null;
+    }
+    if (!remoteEnabled || !currentUser?.id) {
+      setWorkspaceStatus("Sign in and connect Supabase before joining a workspace.");
+      return null;
+    }
+
+    setWorkspaceStatus("joining");
+
+    try {
+      const workspace = await joinSupabaseWorkspace(code, currentUser.id, {
+        memberName: profile.fullName || currentUser.email,
+      });
+      setWorkspaces((current) =>
+        normalizeLoadedWorkspaces([
+          ...current.filter((item) => item.id !== workspace.id),
+          workspace,
+        ])
+      );
+      setActiveWorkspaceId(workspace.id);
+      setWorkspaceStatus("connected");
+      return workspace;
+    } catch (error) {
+      const message = error?.message || "That workspace could not be joined.";
+      setWorkspaceStatus(message);
+      console.warn("EVA workspace join failed.", message);
+      return null;
+    }
+  }
+
   function addTask(input) {
+    const targetWorkspaceId =
+      input.workspaceId !== undefined
+        ? input.workspaceId
+        : workspaceMode
+          ? activeWorkspaceId
+          : "";
     const task = {
       id: makeLocalRecordId("task"),
       title: input.title || "New executive task",
@@ -970,6 +1278,11 @@ export function EVAAppProvider({ children }) {
       priority: input.priority || "Medium",
       status: input.status || "To do",
       due: input.due || "Today",
+      owner: input.owner || (workspaceMode ? profile.fullName : ""),
+      workspaceId: targetWorkspaceId || "",
+      workspaceName: targetWorkspaceId ? activeWorkspace.name : "",
+      createdBy: currentUser?.id || "",
+      assignedTo: input.assignedTo || "",
     };
     debugEvaFlow("task: before saving", task);
     setTasks((current) => {
@@ -1028,6 +1341,7 @@ export function EVAAppProvider({ children }) {
   }
 
   function updateTaskStatus(id, status) {
+    const existingTask = tasks.find((task) => task.id === id);
     setTasks((current) =>
       current.map((task) => (task.id === id ? { ...task, status } : task))
     );
@@ -1036,9 +1350,16 @@ export function EVAAppProvider({ children }) {
       return;
     }
 
+    if (!currentUser?.id) return;
+
     syncMutation(
       "task_status",
-      () => updateSupabaseTask(id, { status }, currentUser.id),
+      () =>
+        updateSupabaseTask(
+          id,
+          { status, workspaceId: existingTask?.workspaceId || "" },
+          currentUser.id
+        ),
       (data) => {
         if (data) {
           replaceRecord(setTasks, id, data);
@@ -1258,6 +1579,50 @@ export function EVAAppProvider({ children }) {
     return updatedMeeting;
   }
 
+  async function prepareMeetingBriefing(input = {}) {
+    const target = findMeetingForBriefing(input, meetings);
+
+    if (!target) {
+      return {
+        ok: false,
+        reply:
+          "I do not see a next meeting yet. Add the meeting first and I will prepare a briefing around it.",
+      };
+    }
+
+    const briefing = buildMeetingBriefing({
+      meeting: target,
+      tasks: visibleTasks,
+      documents,
+      aiReply: input.briefing || input.reply,
+    });
+    const patch = {
+      briefing,
+      briefingStatus: "ready",
+      briefingUpdatedAt: new Date().toISOString(),
+    };
+
+    patchRecord(setMeetings, target.id, patch);
+
+    if (!isLocalRecordId(target.id, "meeting")) {
+      syncMutation(
+        "meeting_briefing",
+        () => updateSupabaseMeeting(target.id, patch, currentUser.id),
+        (data) => {
+          if (data) {
+            replaceRecord(setMeetings, target.id, data);
+          }
+        }
+      );
+    }
+
+    return {
+      ok: true,
+      meeting: { ...target, ...patch },
+      reply: `Done. I prepared a briefing for ${target.title}. You can open it from Calendar / Meetings.`,
+    };
+  }
+
   function addDocument(input) {
     const document = {
       id: makeLocalRecordId("doc"),
@@ -1298,31 +1663,47 @@ export function EVAAppProvider({ children }) {
       id: makeLocalRecordId("reminder"),
       title: input.title || "Executive reminder",
       due: input.due || "Today",
+      detail: input.details || input.detail || "",
+      reminder_time: input.reminder_time || input.time || "",
+      notificationId: "",
+      reminderScheduled: false,
+      reminderStatus: notificationEnabled ? "pending" : "off",
     };
     setReminders((current) => [reminder, ...current]);
-    syncMutation(
-      "reminder",
-      () => createSupabaseReminder(reminder, currentUser.id),
-      (data) => {
-        if (data) {
-          replaceRecord(setReminders, reminder.id, data);
+
+    const saveReminder = (nextReminder) => {
+      syncMutation(
+        "reminder",
+        () => createSupabaseReminder(nextReminder, currentUser.id),
+        (data) => {
+          if (data) {
+            replaceRecord(
+              setReminders,
+              reminder.id,
+              mergeReminderSyncResult(nextReminder, data)
+            );
+          }
         }
-      }
-    );
+      );
+    };
 
     if (notificationEnabled) {
       scheduleReminderNotification({
         ...reminder,
-        details: reminder.title,
-        reminder_time: input.reminder_time || input.time || "",
+        details: reminder.detail || reminder.title,
       })
         .then((notificationResult) => {
+          const notificationPatch = {
+            notificationId: notificationResult.notification_id || "",
+            reminderScheduled: Boolean(notificationResult.reminder_scheduled),
+            reminderStatus: notificationResult.reminder_status || "schedule_failed",
+          };
+
+          patchRecord(setReminders, reminder.id, notificationPatch);
+          saveReminder({ ...reminder, ...notificationPatch });
+
           if (notificationResult.ok) {
             setNotificationPermissionStatus("connected");
-            patchRecord(setReminders, reminder.id, {
-              notification_id: notificationResult.notification_id || "",
-              reminder_status: notificationResult.reminder_status || "scheduled",
-            });
             return;
           }
 
@@ -1340,11 +1721,19 @@ export function EVAAppProvider({ children }) {
           }
         })
         .catch((error) => {
+          const notificationPatch = {
+            reminderScheduled: false,
+            reminderStatus: "schedule_failed",
+          };
+          patchRecord(setReminders, reminder.id, notificationPatch);
+          saveReminder({ ...reminder, ...notificationPatch });
           setDeviceIntegrationWarning(
             error?.message ||
               "Reminder saved in EVA, but the notification was not scheduled."
           );
         });
+    } else {
+      saveReminder(reminder);
     }
 
     return reminder;
@@ -1447,11 +1836,8 @@ export function EVAAppProvider({ children }) {
         ? `Summary of "${latest.title}": ${latest.summary}`
         : "There are no notes yet. Add a document or paste notes into Knowledge first.";
     } else if (/brief|briefing|prepare my next move|next move/.test(lower)) {
-      const nextMeeting = meetings[0];
-      const highTasks = tasks.filter((task) => task.priority === "High");
-      reply = nextMeeting
-        ? `Briefing focus for ${nextMeeting.title}: confirm the outcome, decisions needed, open risks, and follow-up owner. Then clear ${highTasks.length || 1} high-priority action.`
-        : "I do not see a next meeting yet. Add the meeting first and I will prepare a briefing around it.";
+      const result = await prepareMeetingBriefing({ title: content });
+      reply = result.reply;
     } else if (/reschedule|move|shift/.test(lower)) {
       const target = meetings[0];
       if (target) {
@@ -1514,6 +1900,17 @@ export function EVAAppProvider({ children }) {
       actionType,
       rawActionType: action?.type,
     });
+
+    if (actionType === "prepare_meeting_briefing") {
+      const result = await prepareMeetingBriefing({
+        title: action?.title || action?.meeting_title || content,
+        meetingId: action?.meeting_id || action?.meetingId,
+        briefing: action?.briefing || action?.agenda || response?.reply,
+        reply: response?.reply,
+      });
+
+      return result.reply || fallbackReply;
+    }
 
     if (!action) {
       return fallbackReply;
@@ -1588,9 +1985,18 @@ export function EVAAppProvider({ children }) {
         return response?.reply || "Sure. What should I remind you about?";
       }
 
+      const reminderSchedule = getAssistantReminderSchedule(action);
+      if (!reminderSchedule.hasSchedule) {
+        return response?.reply && !/set|created|done/i.test(response.reply)
+          ? response.reply
+          : `Sure. When should I remind you about ${title}?`;
+      }
+
       const reminder = addReminder({
         title,
-        due: formatAssistantActionDate(action.reminder_time || action.due_date || action.due),
+        details: action.details || "",
+        due: reminderSchedule.due,
+        reminder_time: reminderSchedule.reminderTime,
       });
 
       return response?.reply || `Reminder set: ${reminder.title}, ${reminder.due}.`;
@@ -1609,7 +2015,7 @@ export function EVAAppProvider({ children }) {
 
       return (
         response?.reply ||
-        `I rescheduled "${updated.title}" to ${updated.date} at ${updated.time}.`
+        `I rescheduled "${updated?.title}" to ${updated?.date} at ${updated?.time}.`
       );
     }
 
@@ -1622,6 +2028,12 @@ export function EVAAppProvider({ children }) {
       appStatus: syncStatus,
       syncWarning,
       profile,
+      workspace: {
+        id: activeWorkspace.id,
+        name: activeWorkspace.name,
+        mode: workspaceMode ? "team" : "personal",
+        role: activeWorkspace.role,
+      },
       aiBehavior,
       voiceMode,
       notificationsEnabled: notificationEnabled,
@@ -1631,7 +2043,7 @@ export function EVAAppProvider({ children }) {
       notificationPermissionStatus,
       microphonePermissionStatus,
       deepgramConnectionStatus,
-      tasks: tasks.slice(0, 10).map(({ title, priority, status, due }) => ({
+      tasks: visibleTasks.slice(0, 10).map(({ title, priority, status, due }) => ({
         title,
         priority,
         status,
@@ -1735,6 +2147,14 @@ export function EVAAppProvider({ children }) {
     deepgramConnectionStatus,
     deviceIntegrationWarning,
     profile,
+    workspaces,
+    activeWorkspace,
+    activeWorkspaceId,
+    workspaceMode,
+    workspaceStatus,
+    workspaceMembers,
+    workspaceMemberStatus,
+    canManageWorkspace,
     remoteEnabled,
     assistantConnection,
     syncStatus,
@@ -1752,6 +2172,11 @@ export function EVAAppProvider({ children }) {
     setDefaultMeetingReminderMinutes,
     clearLocalPreviewData,
     updateProfile,
+    selectWorkspace,
+    createWorkspace,
+    joinWorkspace,
+    refreshWorkspaceMembers,
+    updateWorkspaceMemberRole,
     tasks,
     activeTasks,
     completedTasks,
@@ -1764,6 +2189,7 @@ export function EVAAppProvider({ children }) {
     addMeeting,
     rescheduleMeeting,
     deleteMeeting,
+    prepareMeetingBriefing,
     addDocument,
     addTranscript,
     addReminder,
@@ -1794,6 +2220,36 @@ function patchRecord(setter, id, patch) {
   setter((current) =>
     current.map((record) => (record.id === id ? { ...record, ...patch } : record))
   );
+}
+
+function mergeReminderSyncResult(localReminder, remoteReminder) {
+  const remoteStatus = remoteReminder.reminderStatus || remoteReminder.reminder_status;
+  const localStatus = localReminder.reminderStatus || localReminder.reminder_status;
+
+  return {
+    ...localReminder,
+    ...remoteReminder,
+    due: localReminder.due || remoteReminder.due || "Today",
+    reminder_time:
+      localReminder.reminder_time ||
+      localReminder.reminderTime ||
+      remoteReminder.reminder_time ||
+      remoteReminder.reminderTime ||
+      "",
+    notificationId:
+      remoteReminder.notificationId ||
+      remoteReminder.notification_id ||
+      localReminder.notificationId ||
+      localReminder.notification_id ||
+      "",
+    reminderScheduled:
+      Boolean(remoteReminder.reminderScheduled ?? remoteReminder.reminder_scheduled) ||
+      Boolean(localReminder.reminderScheduled ?? localReminder.reminder_scheduled),
+    reminderStatus:
+      remoteStatus && remoteStatus !== "not_scheduled"
+        ? remoteStatus
+        : localStatus || remoteStatus || "not_scheduled",
+  };
 }
 
 function getAuthStatus({
@@ -1873,6 +2329,39 @@ function mergeRemoteWithPendingLocal(remoteRecords, currentRecords, initialIds) 
   return [...pendingLocal, ...remote];
 }
 
+function normalizeLoadedWorkspaces(remoteWorkspaces = []) {
+  const seen = new Set([PERSONAL_WORKSPACE_ID]);
+  const teamWorkspaces = (Array.isArray(remoteWorkspaces) ? remoteWorkspaces : [])
+    .filter((workspace) => workspace?.id)
+    .filter((workspace) => {
+      const id = String(workspace.id);
+      if (seen.has(id)) {
+        return false;
+      }
+      seen.add(id);
+      return true;
+    })
+    .map((workspace) => ({
+      id: String(workspace.id),
+      name: workspace.name || "EVA Workspace",
+      role: normalizeWorkspaceRole(workspace.role),
+      type: "team",
+      inviteCode: workspace.inviteCode || workspace.invite_code || "",
+      ownerId: workspace.ownerId || workspace.owner_id || "",
+      status: workspace.status || "active",
+    }));
+
+  return [personalWorkspace, ...teamWorkspaces];
+}
+
+function normalizeWorkspaceRole(value) {
+  const role = String(value || "member").toLowerCase();
+  if (role === "owner" || role === "admin" || role === "viewer") {
+    return role;
+  }
+  return "member";
+}
+
 function normalizeAssistantActionType(value) {
   const type = String(value || "").trim().toLowerCase();
   const aliases = {
@@ -1890,6 +2379,9 @@ function normalizeAssistantActionType(value) {
     add_reminder: "create_reminder",
     set_reminder: "create_reminder",
     schedule_reminder: "create_reminder",
+    meeting_briefing: "prepare_meeting_briefing",
+    prepare_briefing: "prepare_meeting_briefing",
+    create_briefing: "prepare_meeting_briefing",
   };
 
   return aliases[type] || type;
@@ -1929,6 +2421,120 @@ function summarizeRecords(records) {
         }
       : null,
   };
+}
+
+function findMeetingForBriefing(input = {}, meetings = []) {
+  const meetingList = Array.isArray(meetings) ? meetings : [];
+  if (!meetingList.length) {
+    return null;
+  }
+
+  const meetingId = String(input.meetingId || input.meeting_id || "").trim();
+  if (meetingId) {
+    const directMatch = meetingList.find((meeting) => meeting.id === meetingId);
+    if (directMatch) {
+      return directMatch;
+    }
+  }
+
+  const rawTitle = String(
+    input.title ||
+      input.meetingTitle ||
+      input.meeting_title ||
+      input.content ||
+      ""
+  );
+  const subjectMatch = rawTitle.match(/\b(?:for|about|with)\s+(.+?)$/i);
+  const lookup = normalizeMeetingLookup(subjectMatch?.[1] || rawTitle);
+
+  if (lookup && !/\b(next|upcoming|meeting|briefing|prepare)\b/.test(lookup)) {
+    const tokens = lookup
+      .split(" ")
+      .filter((token) => token.length > 2 && !["the", "for", "with"].includes(token));
+    const matched = meetingList.find((meeting) => {
+      const title = normalizeMeetingLookup(meeting.title);
+      return (
+        title.includes(lookup) ||
+        lookup.includes(title) ||
+        tokens.some((token) => title.includes(token))
+      );
+    });
+
+    if (matched) {
+      return matched;
+    }
+  }
+
+  return getNextMeeting(meetingList);
+}
+
+function getNextMeeting(meetings = []) {
+  const now = new Date();
+  const enriched = meetings
+    .map((meeting, index) => ({
+      meeting,
+      index,
+      range: resolveMeetingDateRange(meeting),
+    }))
+    .sort((left, right) => {
+      const leftTime = left.range?.startDate?.getTime() || Number.MAX_SAFE_INTEGER;
+      const rightTime = right.range?.startDate?.getTime() || Number.MAX_SAFE_INTEGER;
+      return leftTime - rightTime || left.index - right.index;
+    });
+
+  const upcoming = enriched.find(
+    (item) => item.range?.startDate && item.range.startDate >= now
+  );
+
+  return (upcoming || enriched[0])?.meeting || null;
+}
+
+function buildMeetingBriefing({ meeting, tasks = [], documents = [], aiReply = "" }) {
+  const highTasks = (Array.isArray(tasks) ? tasks : []).filter(
+    (task) => task.priority === "High" && task.status !== "Done"
+  );
+  const activeTasks = (Array.isArray(tasks) ? tasks : []).filter(
+    (task) => task.status !== "Done"
+  );
+  const latestDocument = Array.isArray(documents) ? documents[0] : null;
+  const aiFocus = String(aiReply || "")
+    .replace(/^done\.?\s*/i, "")
+    .trim();
+
+  const lines = [
+    `Prepared brief for ${meeting.title}.`,
+    `Outcome: confirm the main decision, owner, deadline, and next action before the meeting ends.`,
+    `People: ${meeting.attendees || "Team"}.`,
+    `Time: ${meeting.date || "Today"} at ${meeting.time || "TBD"}.`,
+  ];
+
+  if (aiFocus && !/i do not see a next meeting/i.test(aiFocus)) {
+    lines.push(`Focus: ${aiFocus}`);
+  }
+
+  if (highTasks.length) {
+    lines.push(
+      `Related priority: ${highTasks[0].title}. Keep it visible during the discussion.`
+    );
+  } else if (activeTasks.length) {
+    lines.push(`Related task: ${activeTasks[0].title}.`);
+  }
+
+  if (latestDocument?.summary) {
+    lines.push(`Context: ${latestDocument.summary}`);
+  }
+
+  lines.push("Follow-up: capture decisions, unresolved risks, and who owns each action.");
+  return lines.join("\n");
+}
+
+function normalizeMeetingLookup(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\b(prepare|brief|briefing|meeting|for|about|with|the|a|an)\b/g, " ")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function isLocalRecordId(id, prefix) {
@@ -2171,6 +2777,45 @@ function formatAssistantActionDate(value) {
   }
 
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function getAssistantReminderSchedule(action = {}) {
+  const dueSource =
+    action.due_date ||
+    action.due ||
+    action.date ||
+    action.reminder_date ||
+    "";
+  const timeSource =
+    action.reminder_time ||
+    action.time ||
+    action.start_time ||
+    action.due_at ||
+    "";
+  const parsedDateTime = parseAssistantDateTime(action.due_at || action.reminder_time);
+  const hasSchedule = Boolean(String(dueSource || timeSource).trim()) || Boolean(parsedDateTime);
+
+  return {
+    hasSchedule,
+    due: formatAssistantActionDate(
+      dueSource || (parsedDateTime ? parsedDateTime.toISOString() : "today")
+    ),
+    reminderTime: parsedDateTime
+      ? parsedDateTime.toISOString()
+      : timeSource
+        ? formatAssistantActionTime(timeSource)
+        : "",
+  };
+}
+
+function parseAssistantDateTime(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function formatAssistantActionTime(value) {

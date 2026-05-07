@@ -225,6 +225,7 @@ export function DocumentsScreen() {
             onChangeText={(text) => {
               setLiveTranscript(text);
               if (text.trim()) setTranscriptStatus("editing");
+              else if (transcribingRef.current) setTranscriptStatus("listening");
             }}
             placeholder="Transcript will appear here as you speak. You can also type or paste notes."
             placeholderTextColor={colors.textMuted}

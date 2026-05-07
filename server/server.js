@@ -1644,7 +1644,7 @@ Schema:
   "reply": "short response to the user",
   "intent": "one supported intent",
   "action": null or {
-    "type": "create_task | create_meeting | reschedule_meeting | cancel_meeting | create_reminder | create_follow_up_action",
+    "type": "create_task | create_meeting | reschedule_meeting | cancel_meeting | create_reminder | create_follow_up_action | prepare_meeting_briefing",
     "title": "string",
     "details": "string",
     "priority": "low | medium | high",
@@ -1662,6 +1662,8 @@ Rules:
 - Treat questions like "what meetings do I have today" as show_today_schedule, not create_meeting.
 - Treat questions like "what tasks need attention" as show_pending_tasks, not create_task.
 - Treat briefing requests about meetings as prepare_meeting_briefing, not create_meeting.
+- If the user asks for a meeting briefing and there is a meeting in context, return action.type "prepare_meeting_briefing" with the best target meeting title and a concise briefing in agenda.
+- If the user asks for a meeting briefing and no meeting exists in context, ask one follow-up question and set action to null.
 - Create actions only when the user is clearly asking EVA to create, schedule, reschedule, cancel, or remind.
 - Read the full conversation history before asking any follow-up questions. If the user already provided the time, title, or attendees in an earlier turn, extract those values and act — do not ask again.
 - If a meeting request does not include a time anywhere in the conversation, ask one follow-up question and set action to null.
@@ -1932,6 +1934,7 @@ function sanitizeEvaMobileAssistantAction(action, fallbackAction = null) {
     "cancel_meeting",
     "create_reminder",
     "create_follow_up_action",
+    "prepare_meeting_briefing",
   ];
 
   if (!allowedTypes.includes(type)) {
@@ -1974,6 +1977,9 @@ function normalizeEvaMobileAssistantIntent(value) {
     add_reminder: "create_reminder",
     set_reminder: "create_reminder",
     schedule_reminder: "create_reminder",
+    meeting_briefing: "prepare_meeting_briefing",
+    prepare_briefing: "prepare_meeting_briefing",
+    create_briefing: "prepare_meeting_briefing",
   };
 
   return aliases[intent] || intent;
@@ -2097,7 +2103,21 @@ function createEvaMobileMockAssistantResponse(userMessage, context = {}) {
         "prepare_meeting_briefing"
       ),
       intent: "prepare_meeting_briefing",
-      action: null,
+      action: nextMeeting
+        ? {
+            type: "prepare_meeting_briefing",
+            title: nextMeeting.title || "Next meeting",
+            details: "",
+            priority: "medium",
+            due_date: "",
+            meeting_date: nextMeeting.date || "",
+            start_time: nextMeeting.time || "",
+            duration_minutes: 30,
+            attendees: [],
+            agenda: `Confirm the outcome, decisions needed, open risks, and follow-up owner for ${nextMeeting.title || "the meeting"}.`,
+            reminder_time: null,
+          }
+        : null,
     };
   }
 

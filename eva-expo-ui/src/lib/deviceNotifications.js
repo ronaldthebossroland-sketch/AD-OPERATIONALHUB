@@ -245,8 +245,16 @@ export async function scheduleReminderNotification(reminder) {
     return notificationFailure("missing_date_time", "Reminder time is missing or could not be parsed.");
   }
 
-  if (triggerAt <= new Date()) {
+  const msUntilTrigger = triggerAt.getTime() - Date.now();
+  if (msUntilTrigger <= 0) {
     return notificationFailure("skipped_past_due", "Reminder time is already in the past.");
+  }
+  if (msUntilTrigger < 90 * 1000) {
+    // Too close for reliable Android delivery — push to 2 minutes from now
+    triggerAt = new Date(Date.now() + 120 * 1000);
+  } else {
+    // Shift 45 seconds early to absorb Android inexact-alarm delivery jitter
+    triggerAt = new Date(triggerAt.getTime() - 45 * 1000);
   }
 
   try {

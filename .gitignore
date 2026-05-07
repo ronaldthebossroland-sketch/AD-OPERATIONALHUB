@@ -38,6 +38,7 @@ server/*.db-*
 eva-expo-ui/.expo-export-check/
 eva-expo-ui/eva-phone-expo-screenshot*.png
 eva-phone-expo-screenshot*.png
+*.apk
 .claude
 eva-expo-ui/android
 eva-expo-ui/ios

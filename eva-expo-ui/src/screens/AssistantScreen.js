@@ -90,7 +90,7 @@ export function AssistantScreen() {
   }
 
   async function handleMicPress() {
-    if (voiceState === "transcribing") {
+    if (voiceState === "transcribing" || voiceState === "processing") {
       return;
     }
 
@@ -182,10 +182,13 @@ export function AssistantScreen() {
         deepgramStatus: "connected",
         message: "",
       });
-      setVoiceMessage("");
-      setVoiceState("idle");
+      setVoiceMessage(`Heard: "${formatTranscriptPreview(transcript)}" EVA is working on it now...`);
+      setVoiceState("processing");
+      setStatus("Working");
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
       submittedTranscript = true;
       const spokenReply = await submitMessage(transcript);
+      setVoiceMessage("");
       const speechResult = await speakEvaReply(spokenReply, voiceMode);
       if (!speechResult.ok) {
         updateVoiceIntegrationStatus({
@@ -206,6 +209,8 @@ export function AssistantScreen() {
       if (!submittedTranscript) {
         setVoiceState("idle");
         setStatus("Ready");
+      } else {
+        setVoiceState("idle");
       }
     }
   }
@@ -215,6 +220,8 @@ export function AssistantScreen() {
       ? "EVA is listening"
       : voiceState === "transcribing"
         ? "EVA is transcribing your voice command"
+        : voiceState === "processing"
+          ? "EVA heard you and is preparing the action"
         : "EVA is processing the command";
 
   return (
@@ -262,10 +269,14 @@ export function AssistantScreen() {
           value={draft}
           onChangeText={setDraft}
           onSubmit={() => submitMessage()}
-          disabled={voiceState === "transcribing"}
+          disabled={voiceState === "transcribing" || voiceState === "processing"}
         />
       </View>
-      <FloatingMic onPress={handleMicPress} state={voiceState} disabled={voiceState === "transcribing"} />
+      <FloatingMic
+        onPress={handleMicPress}
+        state={voiceState}
+        disabled={voiceState === "transcribing" || voiceState === "processing"}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -275,6 +286,11 @@ function permissionStatusLabel(permission = {}) {
   if (permission.status === "denied") return "denied";
   if (permission.status === "unavailable") return "unavailable";
   return "not_connected";
+}
+
+function formatTranscriptPreview(transcript) {
+  const text = String(transcript || "").replace(/\s+/g, " ").trim();
+  return text.length > 96 ? `${text.slice(0, 93).trim()}...` : text;
 }
 
 function createStyles({ colors, radii, spacing, type }, compact) {

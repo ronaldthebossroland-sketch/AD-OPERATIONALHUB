@@ -9,11 +9,11 @@ export function FloatingMic({ disabled = false, onPress, state = "idle" }) {
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const listening = state === "listening";
-  const transcribing = state === "transcribing";
-  const iconName = listening ? "stop" : transcribing ? "sync" : "mic";
+  const working = state === "transcribing" || state === "processing";
+  const iconName = listening ? "stop" : working ? "sync" : "mic";
   const gradientColors = listening
     ? [colors.high, colors.amber, colors.electric]
-    : transcribing
+    : working
       ? [colors.electric, colors.blue, colors.green]
       : [colors.electric, colors.blue, colors.violet];
 
@@ -31,7 +31,7 @@ export function FloatingMic({ disabled = false, onPress, state = "idle" }) {
         style={styles.button}
       >
         <View style={[styles.inner, listening && styles.innerListening]}>
-          <Ionicons name={iconName} size={transcribing ? 27 : 30} color={colors.white} />
+          <Ionicons name={iconName} size={working ? 27 : 30} color={colors.white} />
         </View>
       </LinearGradient>
     </TouchableOpacity>

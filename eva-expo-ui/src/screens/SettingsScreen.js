@@ -40,8 +40,16 @@ export function SettingsScreen() {
     clearLocalPreviewData,
     profile,
     updateProfile,
+    currentUser,
     accountEmail,
     signOut,
+    activeWorkspace,
+    workspaceMode,
+    workspaceMembers,
+    workspaceMemberStatus,
+    canManageWorkspace,
+    refreshWorkspaceMembers,
+    updateWorkspaceMemberRole,
   } = useEVAApp();
   const { width } = useWindowDimensions();
   const layout = useMemo(
@@ -100,6 +108,20 @@ export function SettingsScreen() {
             </View>
           </View>
         </GlowCard>
+
+        <SectionTitle title="Workspace Members" />
+        <WorkspaceMembersCard
+          activeWorkspace={activeWorkspace}
+          canManageWorkspace={canManageWorkspace}
+          colors={colors}
+          currentUserId={currentUser?.id || ""}
+          members={workspaceMembers}
+          refreshWorkspaceMembers={refreshWorkspaceMembers}
+          status={workspaceMemberStatus}
+          styles={styles}
+          updateWorkspaceMemberRole={updateWorkspaceMemberRole}
+          workspaceMode={workspaceMode}
+        />
 
         <SectionTitle title="Preferences" />
         <GlowCard style={styles.appearanceCard}>
@@ -361,6 +383,150 @@ function SmallButton({ colors, icon, label, onPress, styles }) {
   );
 }
 
+function WorkspaceMembersCard({
+  activeWorkspace,
+  canManageWorkspace,
+  colors,
+  currentUserId,
+  members,
+  refreshWorkspaceMembers,
+  status,
+  styles,
+  updateWorkspaceMemberRole,
+  workspaceMode,
+}) {
+  const [localStatus, setLocalStatus] = useState("");
+  const roleOptions = ["viewer", "member", "admin"];
+
+  async function changeRole(member, role) {
+    setLocalStatus("Updating role...");
+    const updated = await updateWorkspaceMemberRole(member.id, role);
+    setLocalStatus(
+      updated
+        ? `${member.displayName} is now ${role}.`
+        : "Role was not changed."
+    );
+  }
+
+  async function refreshMembers() {
+    setLocalStatus("Refreshing members...");
+    const refreshed = await refreshWorkspaceMembers();
+    setLocalStatus(`${refreshed.length} member${refreshed.length === 1 ? "" : "s"} loaded.`);
+  }
+
+  if (!workspaceMode) {
+    return (
+      <GlowCard style={styles.workspaceCard}>
+        <View style={styles.integrationRow}>
+          <View style={styles.settingIcon}>
+            <Ionicons name="people-outline" size={20} color={colors.electric} />
+          </View>
+          <View style={styles.settingCopy}>
+            <Text style={styles.settingTitle}>Personal EVA is active</Text>
+            <Text style={styles.settingDescription}>
+              Create or select a team workspace from Tasks, then manage its members here.
+            </Text>
+          </View>
+        </View>
+      </GlowCard>
+    );
+  }
+
+  return (
+    <GlowCard style={styles.workspaceCard}>
+      <View style={styles.workspaceHeader}>
+        <View style={styles.settingIcon}>
+          <Ionicons name="people-outline" size={20} color={colors.electric} />
+        </View>
+        <View style={styles.settingCopy}>
+          <Text style={styles.settingTitle}>{activeWorkspace.name}</Text>
+          <Text style={styles.settingDescription}>
+            Your role: {activeWorkspace.role}. Shared tasks stay visible to this workspace.
+          </Text>
+          {activeWorkspace.inviteCode ? (
+            <Text style={styles.workspaceInvite}>
+              Invite code: {activeWorkspace.inviteCode}
+            </Text>
+          ) : null}
+        </View>
+        <TouchableOpacity
+          activeOpacity={0.84}
+          style={styles.iconButton}
+          onPress={refreshMembers}
+        >
+          <Ionicons name="refresh" size={18} color={colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.memberList}>
+        {members.length ? (
+          members.map((member) => {
+            const locked = !canManageWorkspace || member.role === "owner";
+            return (
+              <View key={member.id} style={styles.memberRow}>
+                <View style={styles.memberAvatar}>
+                  <Text style={styles.memberAvatarText}>
+                    {makeInitials(member.displayName)}
+                  </Text>
+                </View>
+                <View style={styles.memberCopy}>
+                  <Text style={styles.memberName}>
+                    {member.displayName}
+                    {member.userId === currentUserId ? " (you)" : ""}
+                  </Text>
+                  <Text style={styles.memberRole}>{member.role}</Text>
+                </View>
+                <View style={styles.roleOptions}>
+                  {member.role === "owner" ? (
+                    <Text style={styles.ownerBadge}>Owner</Text>
+                  ) : (
+                    roleOptions.map((role) => {
+                      const active = member.role === role;
+                      return (
+                        <TouchableOpacity
+                          key={role}
+                          activeOpacity={0.84}
+                          disabled={locked || active}
+                          style={[
+                            styles.roleChip,
+                            active && styles.roleChipActive,
+                            locked && !active && styles.roleChipDisabled,
+                          ]}
+                          onPress={() => changeRole(member, role)}
+                        >
+                          <Text
+                            style={[
+                              styles.roleChipText,
+                              active && styles.roleChipTextActive,
+                            ]}
+                          >
+                            {role}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })
+                  )}
+                </View>
+              </View>
+            );
+          })
+        ) : (
+          <Text style={styles.settingDescription}>
+            {status === "loading"
+              ? "Loading workspace members..."
+              : "No members are visible yet. Share the invite code when you are ready."}
+          </Text>
+        )}
+      </View>
+
+      {localStatus ||
+      (status && !["connected", "personal", "loading"].includes(String(status))) ? (
+        <Text style={styles.integrationMessage}>{localStatus || status}</Text>
+      ) : null}
+    </GlowCard>
+  );
+}
+
 function ProfileSettingsCard({
   accountEmail,
   colors,
@@ -559,6 +725,117 @@ function createStyles({ colors, radii, spacing, type }, layout) {
     accountCard: {
       marginBottom: spacing.md,
       gap: spacing.md,
+    },
+    workspaceCard: {
+      marginBottom: spacing.md,
+      gap: spacing.md,
+    },
+    workspaceHeader: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "flex-start",
+      gap: spacing.md,
+    },
+    workspaceInvite: {
+      ...type.caption,
+      marginTop: spacing.xs,
+      color: colors.electric,
+    },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: colors.glassBorder,
+      backgroundColor: colors.glassSurface,
+    },
+    memberList: {
+      gap: spacing.sm,
+    },
+    memberRow: {
+      minHeight: 72,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: colors.glassBorder,
+      backgroundColor: colors.glassSurface,
+      padding: spacing.md,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      gap: spacing.md,
+    },
+    memberAvatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.glassButton,
+      borderWidth: 1,
+      borderColor: colors.glassBorder,
+    },
+    memberAvatarText: {
+      color: colors.text,
+      fontSize: 12,
+      lineHeight: 16,
+      fontWeight: "900",
+    },
+    memberCopy: {
+      flex: 1,
+      minWidth: 130,
+    },
+    memberName: {
+      color: colors.text,
+      fontSize: 14,
+      lineHeight: 18,
+      fontWeight: "800",
+    },
+    memberRole: {
+      ...type.caption,
+      marginTop: spacing.xs,
+      color: colors.textMuted,
+      textTransform: "capitalize",
+    },
+    roleOptions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.xs,
+      justifyContent: "flex-end",
+    },
+    roleChip: {
+      minHeight: 32,
+      borderRadius: radii.pill,
+      paddingHorizontal: spacing.sm,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: colors.glassBorder,
+      backgroundColor: colors.surfaceRaised,
+    },
+    roleChipActive: {
+      borderColor: colors.glassBorderStrong,
+      backgroundColor: colors.blue,
+    },
+    roleChipDisabled: {
+      opacity: 0.48,
+    },
+    roleChipText: {
+      color: colors.textSoft,
+      fontSize: 11,
+      lineHeight: 14,
+      fontWeight: "800",
+      textTransform: "capitalize",
+    },
+    roleChipTextActive: {
+      color: colors.white,
+    },
+    ownerBadge: {
+      color: colors.electric,
+      fontSize: 12,
+      lineHeight: 16,
+      fontWeight: "900",
     },
     integrationCard: {
       marginBottom: spacing.md,

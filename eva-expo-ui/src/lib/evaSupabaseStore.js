@@ -11,7 +11,15 @@ export async function loadEvaSupabaseData(userId) {
   ensureSupabase();
   const activeUserId = requireUserId(userId);
 
-  const [tasksResult, meetingsResult, remindersResult, documentsResult, preferencesResult] =
+  const [
+    tasksResult,
+    workspaceTasks,
+    meetingsResult,
+    remindersResult,
+    documentsResult,
+    preferencesResult,
+    workspaces,
+  ] =
     await Promise.all([
       supabase
         .from("tasks")
@@ -20,6 +28,7 @@ export async function loadEvaSupabaseData(userId) {
         .eq("user_id", activeUserId)
         .gte("created_at", EVA_CLEAN_DATA_CUTOFF)
         .order("created_at", { ascending: false }),
+      loadSupabaseWorkspaceTasks(activeUserId),
       supabase
         .from("meetings")
         .select("*")
@@ -49,6 +58,7 @@ export async function loadEvaSupabaseData(userId) {
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      loadSupabaseWorkspaces(activeUserId),
     ]);
 
   throwIfError(tasksResult.error);
@@ -63,11 +73,14 @@ export async function loadEvaSupabaseData(userId) {
   ]);
 
   return {
-    tasks: (tasksResult.data || []).filter(isVisibleEvaTask).map(mapSupabaseTask),
+    tasks: dedupeRowsById([...(tasksResult.data || []), ...workspaceTasks])
+      .filter(isVisibleEvaTask)
+      .map(mapSupabaseTask),
     meetings: (meetingsResult.data || []).filter(isVisibleEvaRecord).map(mapSupabaseMeeting),
     reminders: (remindersResult.data || []).filter(isVisibleEvaRecord).map(mapSupabaseReminder),
     documents: (documentsResult.data || []).filter(isVisibleEvaRecord).map(mapSupabaseDocument),
     preferences: mapSupabasePreferences(preferencesResult.data),
+    workspaces,
     profile,
     chat,
   };
@@ -76,11 +89,20 @@ export async function loadEvaSupabaseData(userId) {
 export async function createSupabaseTask(task, userId) {
   ensureSupabase();
   const activeUserId = requireUserId(userId);
-  const { data, error } = await supabase
+  const payload = withUserId(taskPayload(task), activeUserId);
+  let { data, error } = await supabase
     .from("tasks")
-    .insert(withUserId(taskPayload(task), activeUserId))
+    .insert(payload)
     .select()
     .single();
+
+  if (isMissingColumnError(error) && !hasWorkspaceTaskScope(task)) {
+    ({ data, error } = await supabase
+      .from("tasks")
+      .insert(stripTaskWorkspacePayload(payload))
+      .select()
+      .single());
+  }
 
   throwIfError(error);
   return mapSupabaseTask(data);
@@ -89,17 +111,292 @@ export async function createSupabaseTask(task, userId) {
 export async function updateSupabaseTask(id, patch, userId) {
   ensureSupabase();
   const activeUserId = requireUserId(userId);
-  const { data, error } = await supabase
+  const payload = taskPayload(patch);
+  let query = supabase
     .from("tasks")
-    .update(taskPayload(patch))
+    .update(payload)
     .eq("id", id)
+    .eq("app_source", APP_SOURCE);
+
+  if (hasWorkspaceTaskScope(patch)) {
+    query = query.eq("workspace_id", patch.workspaceId || patch.workspace_id);
+  } else {
+    query = query.eq("user_id", activeUserId);
+  }
+
+  let { data, error } = await query
+    .select()
+    .single();
+
+  if (isMissingColumnError(error) && !hasWorkspaceTaskScope(patch)) {
+    ({ data, error } = await supabase
+      .from("tasks")
+      .update(stripTaskWorkspacePayload(payload))
+      .eq("id", id)
+      .eq("app_source", APP_SOURCE)
+      .eq("user_id", activeUserId)
+      .select()
+      .single());
+  }
+
+  throwIfError(error);
+  return mapSupabaseTask(data);
+}
+
+export async function loadSupabaseWorkspaces(userId) {
+  ensureSupabase();
+  const activeUserId = requireUserId(userId);
+
+  try {
+    const { data: members, error: membersError } = await supabase
+      .from("eva_workspace_members")
+      .select("*")
+      .eq("app_source", APP_SOURCE)
+      .eq("user_id", activeUserId)
+      .eq("status", "active");
+
+    if (isMissingTableError(membersError)) {
+      return [];
+    }
+
+    throwIfError(membersError);
+
+    const activeMembers = Array.isArray(members) ? members : [];
+    const workspaceIds = activeMembers
+      .map((member) => member.workspace_id)
+      .filter(Boolean);
+
+    if (!workspaceIds.length) {
+      return [];
+    }
+
+    const { data: workspaces, error: workspacesError } = await supabase
+      .from("eva_workspaces")
+      .select("*")
+      .eq("app_source", APP_SOURCE)
+      .in("id", workspaceIds);
+
+    if (isMissingTableError(workspacesError)) {
+      return [];
+    }
+
+    throwIfError(workspacesError);
+
+    const workspaceById = new Map(
+      (workspaces || []).map((workspace) => [String(workspace.id), workspace])
+    );
+
+    return activeMembers
+      .map((member) =>
+        mapSupabaseWorkspace(workspaceById.get(String(member.workspace_id)), member)
+      )
+      .filter(Boolean);
+  } catch (error) {
+    console.warn("EVA workspace sync is unavailable.", error?.message || error);
+    return [];
+  }
+}
+
+export async function createSupabaseWorkspace(workspace, userId) {
+  ensureSupabase();
+  const activeUserId = requireUserId(userId);
+  const name = String(workspace?.name || "EVA Team Workspace").trim();
+  const displayName = cleanDisplayName(workspace?.memberName || workspace?.displayName);
+  const inviteCode = normalizeWorkspaceInviteCode(
+    workspace?.inviteCode || makeWorkspaceInviteCode(name)
+  );
+
+  const { data: createdWorkspace, error: workspaceError } = await supabase
+    .from("eva_workspaces")
+    .insert({
+      app_source: APP_SOURCE,
+      name,
+      owner_id: activeUserId,
+      invite_code: inviteCode,
+    })
+    .select()
+    .single();
+
+  throwIfError(workspaceError);
+
+  const member = await insertWorkspaceMember({
+      app_source: APP_SOURCE,
+      workspace_id: createdWorkspace.id,
+      user_id: activeUserId,
+      role: "owner",
+      status: "active",
+      display_name: displayName,
+    });
+  return mapSupabaseWorkspace(createdWorkspace, member);
+}
+
+export async function joinSupabaseWorkspace(inviteCode, userId, options = {}) {
+  ensureSupabase();
+  const activeUserId = requireUserId(userId);
+  const normalizedCode = normalizeWorkspaceInviteCode(inviteCode);
+  const displayName = cleanDisplayName(options.memberName || options.displayName);
+
+  if (!normalizedCode) {
+    throw new Error("Enter a workspace invite code.");
+  }
+
+  const { data: rpcWorkspace, error: rpcError } = await supabase
+    .rpc("join_eva_workspace_by_code", {
+      invite_code_text: normalizedCode,
+      display_name_text: displayName,
+    })
+    .maybeSingle();
+
+  if (!isMissingFunctionError(rpcError)) {
+    throwIfError(rpcError);
+    if (rpcWorkspace?.id) {
+      return mapSupabaseWorkspace(rpcWorkspace, {
+        role: rpcWorkspace.role,
+        status: rpcWorkspace.status,
+      });
+    }
+  }
+
+  const { data: workspace, error: workspaceError } = await supabase
+    .from("eva_workspaces")
+    .select("*")
     .eq("app_source", APP_SOURCE)
+    .eq("invite_code", normalizedCode)
+    .maybeSingle();
+
+  throwIfError(workspaceError);
+
+  if (!workspace?.id) {
+    throw new Error("That workspace invite code was not found.");
+  }
+
+  const { data: existingMember, error: existingError } = await supabase
+    .from("eva_workspace_members")
+    .select("*")
+    .eq("app_source", APP_SOURCE)
+    .eq("workspace_id", workspace.id)
     .eq("user_id", activeUserId)
+    .maybeSingle();
+
+  throwIfError(existingError);
+
+  if (existingMember?.id) {
+    return mapSupabaseWorkspace(workspace, existingMember);
+  }
+
+  const member = await insertWorkspaceMember({
+      app_source: APP_SOURCE,
+      workspace_id: workspace.id,
+      user_id: activeUserId,
+      role: "member",
+      status: "active",
+      display_name: displayName,
+    });
+  return mapSupabaseWorkspace(workspace, member);
+}
+
+export async function loadSupabaseWorkspaceMembers(workspaceId, userId) {
+  ensureSupabase();
+  requireUserId(userId);
+  const activeWorkspaceId = requireWorkspaceId(workspaceId);
+
+  let { data, error } = await supabase
+    .from("eva_workspace_members")
+    .select("*")
+    .eq("app_source", APP_SOURCE)
+    .eq("workspace_id", activeWorkspaceId)
+    .eq("status", "active")
+    .order("created_at", { ascending: true });
+
+  if (isMissingTableError(error)) {
+    return [];
+  }
+
+  if (isMissingColumnError(error)) {
+    ({ data, error } = await supabase
+      .from("eva_workspace_members")
+      .select("id,workspace_id,user_id,role,status,app_source,created_at")
+      .eq("app_source", APP_SOURCE)
+      .eq("workspace_id", activeWorkspaceId)
+      .eq("status", "active")
+      .order("created_at", { ascending: true }));
+  }
+
+  throwIfError(error);
+  return (data || []).map(mapSupabaseWorkspaceMember);
+}
+
+export async function updateSupabaseWorkspaceMemberRole(
+  memberId,
+  role,
+  workspaceId,
+  userId
+) {
+  ensureSupabase();
+  requireUserId(userId);
+  const activeWorkspaceId = requireWorkspaceId(workspaceId);
+  const normalizedRole = normalizeWorkspaceRole(role);
+
+  if (normalizedRole === "owner") {
+    throw new Error("Workspace ownership cannot be changed here.");
+  }
+
+  const { data, error } = await supabase
+    .from("eva_workspace_members")
+    .update({ role: normalizedRole })
+    .eq("id", memberId)
+    .eq("workspace_id", activeWorkspaceId)
+    .eq("app_source", APP_SOURCE)
     .select()
     .single();
 
   throwIfError(error);
-  return mapSupabaseTask(data);
+  return mapSupabaseWorkspaceMember(data);
+}
+
+async function insertWorkspaceMember(payload) {
+  let { data, error } = await supabase
+    .from("eva_workspace_members")
+    .insert(payload)
+    .select()
+    .single();
+
+  if (isMissingColumnError(error) && payload.display_name !== undefined) {
+    const fallbackPayload = { ...payload };
+    delete fallbackPayload.display_name;
+    ({ data, error } = await supabase
+      .from("eva_workspace_members")
+      .insert(fallbackPayload)
+      .select()
+      .single());
+  }
+
+  throwIfError(error);
+  return data;
+}
+
+async function loadSupabaseWorkspaceTasks(userId) {
+  requireUserId(userId);
+
+  try {
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("*")
+      .eq("app_source", APP_SOURCE)
+      .not("workspace_id", "is", null)
+      .gte("created_at", EVA_CLEAN_DATA_CUTOFF)
+      .order("created_at", { ascending: false });
+
+    if (isMissingColumnError(error)) {
+      return [];
+    }
+
+    throwIfError(error);
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.warn("EVA workspace task sync is unavailable.", error?.message || error);
+    return [];
+  }
 }
 
 export async function createSupabaseMeeting(meeting, userId) {
@@ -173,14 +470,23 @@ export async function deleteSupabaseMeeting(id, userId) {
 export async function createSupabaseReminder(reminder, userId) {
   ensureSupabase();
   const activeUserId = requireUserId(userId);
-  const { data, error } = await supabase
+  const payload = withUserId(reminderPayload(reminder), activeUserId);
+  let { data, error } = await supabase
     .from("reminders")
-    .insert(withUserId(reminderPayload(reminder), activeUserId))
+    .insert(payload)
     .select()
     .single();
 
+  if (isMissingColumnError(error)) {
+    ({ data, error } = await supabase
+      .from("reminders")
+      .insert(stripReminderNotificationPayload(payload))
+      .select()
+      .single());
+  }
+
   throwIfError(error);
-  return mapSupabaseReminder(data);
+  return mapSupabaseReminder(data, reminder);
 }
 
 export async function createSupabaseDocument(document, userId) {
@@ -335,6 +641,14 @@ function requireUserId(userId) {
   return value;
 }
 
+function requireWorkspaceId(workspaceId) {
+  const value = String(workspaceId || "").trim();
+  if (!value) {
+    throw new Error("A workspace is required.");
+  }
+  return value;
+}
+
 function withUserId(payload, userId) {
   return {
     ...payload,
@@ -344,7 +658,34 @@ function withUserId(payload, userId) {
 
 function isMissingColumnError(error) {
   const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
-  return text.includes("could not find the") && text.includes("column");
+  return (
+    Boolean(getMissingColumnName(error)) ||
+    (text.includes("could not find the") && text.includes("column")) ||
+    (text.includes("column") && text.includes("does not exist"))
+  );
+}
+
+function isMissingTableError(error) {
+  const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  return (
+    (text.includes("relation") && text.includes("does not exist")) ||
+    text.includes("could not find the table") ||
+    (text.includes("schema cache") &&
+      (text.includes("eva_workspaces") ||
+        text.includes("eva_workspace_members")))
+  );
+}
+
+function isMissingFunctionError(error) {
+  if (!error) {
+    return false;
+  }
+  const text = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  return (
+    text.includes("could not find the function") ||
+    (text.includes("function") && text.includes("does not exist")) ||
+    text.includes("schema cache") && text.includes("join_eva_workspace_by_code")
+  );
 }
 
 function stripMissingPreferencePayload(payload, error) {
@@ -395,8 +736,29 @@ function taskPayload(task = {}) {
   if (task.owner !== undefined) {
     payload.owner = task.owner || "";
   }
+  if (task.workspaceId !== undefined || task.workspace_id !== undefined) {
+    payload.workspace_id = task.workspaceId || task.workspace_id || null;
+  }
+  if (task.createdBy !== undefined || task.created_by !== undefined) {
+    payload.created_by = task.createdBy || task.created_by || null;
+  }
+  if (task.assignedTo !== undefined || task.assigned_to !== undefined) {
+    payload.assigned_to = task.assignedTo || task.assigned_to || null;
+  }
 
   return payload;
+}
+
+function stripTaskWorkspacePayload(payload) {
+  const fallbackPayload = { ...payload };
+  delete fallbackPayload.workspace_id;
+  delete fallbackPayload.created_by;
+  delete fallbackPayload.assigned_to;
+  return fallbackPayload;
+}
+
+function hasWorkspaceTaskScope(task = {}) {
+  return Boolean(task.workspaceId || task.workspace_id);
 }
 
 function meetingPayload(meeting = {}) {
@@ -480,13 +842,40 @@ function stripMeetingSyncPayload(payload) {
 }
 
 function reminderPayload(reminder = {}) {
-  return {
+  const payload = {
     app_source: APP_SOURCE,
     title: reminder.title || "Executive reminder",
     details: reminder.details || reminder.detail || "",
-    reminder_time: reminder.due || reminder.reminder_time || "Today",
+    reminder_time:
+      reminder.reminder_time ||
+      reminder.reminderTime ||
+      reminder.time ||
+      reminder.due ||
+      "Today",
     status: reminder.status || "pending",
   };
+
+  if (reminder.notificationId !== undefined || reminder.notification_id !== undefined) {
+    payload.notification_id = reminder.notificationId || reminder.notification_id || "";
+  }
+  if (reminder.reminderScheduled !== undefined || reminder.reminder_scheduled !== undefined) {
+    payload.reminder_scheduled =
+      reminder.reminderScheduled ?? reminder.reminder_scheduled ?? false;
+  }
+  if (reminder.reminderStatus !== undefined || reminder.reminder_status !== undefined) {
+    payload.reminder_status =
+      reminder.reminderStatus || reminder.reminder_status || "not_scheduled";
+  }
+
+  return payload;
+}
+
+function stripReminderNotificationPayload(payload) {
+  const fallbackPayload = { ...payload };
+  delete fallbackPayload.notification_id;
+  delete fallbackPayload.reminder_scheduled;
+  delete fallbackPayload.reminder_status;
+  return fallbackPayload;
 }
 
 function documentPayload(document = {}) {
@@ -639,7 +1028,49 @@ function mapSupabaseTask(row) {
     status: normalizeTaskStatus(row.status),
     due: row.due_date || "Today",
     owner: row.owner || "",
+    workspaceId: row.workspace_id || "",
+    createdBy: row.created_by || row.user_id || "",
+    assignedTo: row.assigned_to || "",
   };
+}
+
+function mapSupabaseWorkspace(row, member = {}) {
+  if (!row?.id) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+    name: row.name || "EVA Workspace",
+    role: normalizeWorkspaceRole(member.role),
+    ownerId: row.owner_id || "",
+    inviteCode: row.invite_code || "",
+    status: member.status || "active",
+  };
+}
+
+function mapSupabaseWorkspaceMember(row = {}) {
+  const userId = String(row.user_id || "");
+  return {
+    id: String(row.id || ""),
+    workspaceId: String(row.workspace_id || ""),
+    userId,
+    displayName: cleanDisplayName(row.display_name) || shortUserId(userId),
+    role: normalizeWorkspaceRole(row.role),
+    status: row.status || "active",
+  };
+}
+
+function dedupeRowsById(rows) {
+  const seen = new Set();
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    const id = String(row?.id || "");
+    if (!id || seen.has(id)) {
+      return false;
+    }
+    seen.add(id);
+    return true;
+  });
 }
 
 function isVisibleEvaTask(row) {
@@ -701,13 +1132,23 @@ function mapSupabaseMeeting(row) {
   };
 }
 
-function mapSupabaseReminder(row) {
+function mapSupabaseReminder(row, fallback = {}) {
   return {
     id: String(row.id),
     title: row.title || "Executive reminder",
     detail: row.details || "",
-    due: row.reminder_time || "Today",
+    due: fallback.due || row.reminder_time || "Today",
+    reminder_time:
+      fallback.reminder_time ||
+      fallback.reminderTime ||
+      row.reminder_time ||
+      "",
     status: row.status || "pending",
+    notificationId: row.notification_id || fallback.notificationId || "",
+    reminderScheduled:
+      row.reminder_scheduled ?? fallback.reminderScheduled ?? false,
+    reminderStatus:
+      row.reminder_status || fallback.reminderStatus || "not_scheduled",
   };
 }
 
@@ -770,6 +1211,43 @@ function normalizeVoiceMode(value) {
     return mode;
   }
   return "calm";
+}
+
+function normalizeWorkspaceRole(value) {
+  const role = String(value || "member").toLowerCase();
+  if (["owner", "admin", "viewer"].includes(role)) {
+    return role;
+  }
+  return "member";
+}
+
+function normalizeWorkspaceInviteCode(value) {
+  return String(value || "")
+    .replace(/[^a-z0-9-]/gi, "")
+    .toUpperCase()
+    .slice(0, 32);
+}
+
+function cleanDisplayName(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function shortUserId(userId) {
+  const value = String(userId || "");
+  return value ? `Member ${value.slice(0, 8)}` : "Workspace member";
+}
+
+function makeWorkspaceInviteCode(name) {
+  const prefix =
+    String(name || "EVA")
+      .replace(/[^a-z0-9]/gi, "")
+      .toUpperCase()
+      .slice(0, 4) || "EVA";
+  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `${prefix}-${random}`;
 }
 
 function mapSupabaseAssistantMessage(row) {

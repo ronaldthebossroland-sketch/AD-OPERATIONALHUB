@@ -109,7 +109,7 @@ export function CalendarScreen() {
             return (
               <GlowCard key={meeting.id} style={styles.meetingCard}>
                 <View style={styles.meetingTop}>
-                  <StatusPill label={meeting.reminder} />
+                  <StatusPill label={meeting.reminder || "No reminder"} />
                   <Text style={styles.timeText}>{meeting.date} - {meeting.time}</Text>
                 </View>
                 {badges.length ? (
@@ -192,6 +192,10 @@ function meetingBadges(meeting) {
     badges.push({ status: "attention", label: "Reminder access needed" });
   } else if (meeting.reminderStatus === "skipped_past_due") {
     badges.push({ status: "neutral", label: "Reminder time passed" });
+  }
+
+  if (/prepared brief/i.test(meeting.briefing || "")) {
+    badges.push({ status: "stable", label: "Brief ready" });
   }
 
   return badges;
