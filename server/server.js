@@ -1656,7 +1656,7 @@ Schema:
     "duration_minutes": 30,
     "attendees": ["name or team"],
     "agenda": "string",
-    "reminder_time": null or "HH:mm 24-hour time or ISO datetime"
+    "reminder_time": null or "full ISO 8601 datetime e.g. 2025-05-08T13:47:00"
   },
   "actions": null or [ array of action objects with the same fields — only for compound requests ]
 }
@@ -1675,7 +1675,7 @@ Rules:
 - If a task request does not include a usable task title, ask one follow-up question and set action to null.
 - If a reschedule or cancel request does not identify the meeting clearly enough, ask one follow-up question and set action to null.
 - If a reminder request does not include what to remember, ask one follow-up question and set action to null.
-- If a reminder request includes a specific time, set reminder_time to that time in HH:mm format or ISO datetime. If no time is given, set reminder_time to null.
+- If a reminder request includes a specific time, return reminder_time as a full ISO 8601 datetime (e.g. "2025-05-07T11:35:00") using the local date from the context above. Use today's date if the requested time has not yet passed today; use tomorrow's date only if the user explicitly says "tomorrow" or the requested time has already passed. Your reply text must say "today" or "tomorrow" to match the actual date you are scheduling. Never return reminder_time as a bare HH:mm string. If no time is given, set reminder_time to null.
 - If the user clearly requests two or more distinct items in one message (e.g. "create a task AND remind me to follow up at 3 PM"), return them as an "actions" array and set "action" to null. Only use "actions" when there are genuinely two or more independent requests.
 - If the user requests only one item, use "action" only and leave "actions" null.
 - If the request is general, answer directly with action null.
@@ -2016,6 +2016,11 @@ function logEvaAssistantDebugResponse(response) {
   });
 }
 
+function getLastEvaMockTurn(context) {
+  const history = Array.isArray(context.recentChatHistory) ? context.recentChatHistory : [];
+  return [...history].reverse().find((m) => m.role === "assistant") || null;
+}
+
 function createEvaMobileMockAssistantResponse(userMessage, context = {}) {
   const text = cleanText(userMessage);
   const lower = text.toLowerCase();
@@ -2023,6 +2028,81 @@ function createEvaMobileMockAssistantResponse(userMessage, context = {}) {
   const memoryMessages = Array.isArray(context.conversationMemory?.messages)
     ? context.conversationMemory.messages
     : [];
+
+  // Detect conversation follow-ups so standalone replies like "To call Daniel"
+  // are understood in context rather than hitting the generic fallback.
+  const lastEvaTurn = getLastEvaMockTurn(context);
+  const lastEvaText = cleanText(lastEvaTurn?.content || "").toLowerCase();
+
+  if (lastEvaText && /what should i remind you|what would you like me to remind|what should i set a reminder/i.test(lastEvaText)) {
+    // User is providing the reminder subject in response to EVA's follow-up question.
+    // Strip any time phrase from the subject so "Call Daniel at 3 PM" → title "Call Daniel".
+    const reminderTime = extractEvaMobileReminderTime(text);
+    const subjectTitle = extractEvaMobileReminderTitle(text);
+    const displayTitle = subjectTitle || text;
+    if (reminderTime) {
+      return {
+        reply: formatEvaMobileBehaviorReply(
+          `Done. I set a reminder to ${displayTitle} for ${formatEvaMobileDisplayTime(reminderTime)}.`,
+          aiBehavior,
+          "create_reminder"
+        ),
+        intent: "create_reminder",
+        action: {
+          type: "create_reminder",
+          title: displayTitle.charAt(0).toUpperCase() + displayTitle.slice(1),
+          details: "",
+          priority: "medium",
+          due_date: "",
+          meeting_date: "",
+          start_time: "",
+          duration_minutes: 30,
+          attendees: [],
+          agenda: "",
+          reminder_time: reminderTime,
+        },
+      };
+    }
+    return {
+      reply: formatEvaMobileBehaviorReply(
+        `Noted. When should I remind you about ${displayTitle}?`,
+        aiBehavior,
+        "create_reminder"
+      ),
+      intent: "create_reminder",
+      action: null,
+    };
+  }
+
+  if (lastEvaText && /when should i remind you|what time should i remind/i.test(lastEvaText)) {
+    // User is providing the time for a pending reminder.
+    const reminderTime = extractEvaMobileReminderTime(text);
+    if (reminderTime) {
+      const pendingTitle = extractEvaMobilePendingReminderTitle(context);
+      const displayTitle = pendingTitle || "that";
+      return {
+        reply: formatEvaMobileBehaviorReply(
+          `Done. I set a reminder about ${displayTitle} for ${formatEvaMobileDisplayTime(reminderTime)}.`,
+          aiBehavior,
+          "create_reminder"
+        ),
+        intent: "create_reminder",
+        action: {
+          type: "create_reminder",
+          title: pendingTitle || text,
+          details: "",
+          priority: "medium",
+          due_date: "",
+          meeting_date: "",
+          start_time: "",
+          duration_minutes: 30,
+          attendees: [],
+          agenda: "",
+          reminder_time: reminderTime,
+        },
+      };
+    }
+  }
 
   if (isEvaMobileConversationMemoryQuestion(lower)) {
     const label = cleanText(context.conversationMemory?.label, "that time");
@@ -2369,11 +2449,28 @@ function isEvaMobilePendingTasksQuestion(lower) {
   );
 }
 
+function extractEvaMobilePendingReminderTitle(context) {
+  const history = Array.isArray(context.recentChatHistory) ? context.recentChatHistory : [];
+  // Walk backwards through history to find the last user turn before EVA asked for the time
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    if (msg.role === "assistant" && /when should i remind you|what time should i remind/i.test(msg.content || "")) {
+      // The user turn before this is the reminder subject
+      const userTurn = history[i - 1];
+      if (userTurn?.role === "user") {
+        return extractEvaMobileReminderTitle(userTurn.content || "");
+      }
+    }
+  }
+  return "";
+}
+
 function extractEvaMobileReminderTitle(text) {
   const cleaned = cleanText(text)
     .replace(/^(please\s+)?remind\s+me\s+(to|about)\s*/i, "")
     .replace(/^(please\s+)?(set|create|add)\s+(a\s+)?(reminder|alarm)\s*(for|to)?\s*/i, "")
-    .replace(/\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/i, "")
+    .replace(/\s+(?:at|by|for)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/gi, "")
+    .replace(/\s+(?:at|by|for)\s+\d{1,2}:\d{2}\b/g, "")
     .trim();
 
   return cleaned;

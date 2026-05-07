@@ -62,6 +62,7 @@ export function SettingsScreen() {
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme, layout), [theme, layout]);
   const [integrationStatus, setIntegrationStatus] = useState("");
+  const [wakeWordMessage, setWakeWordMessage] = useState("");
 
   async function runIntegrationAction(action, successCopy) {
     setIntegrationStatus("Checking...");
@@ -169,11 +170,7 @@ export function SettingsScreen() {
 
         <GlowCard style={styles.notificationCard}>
           <View style={styles.settingIcon}>
-            <Ionicons
-              name={wakeWordEnabled ? "ear-outline" : "ear-outline"}
-              size={20}
-              color={colors.electric}
-            />
+            <Ionicons name="ear-outline" size={20} color={colors.electric} />
           </View>
           <View style={styles.settingCopy}>
             <Text style={styles.settingTitle}>Hi EVA hands-free</Text>
@@ -184,16 +181,26 @@ export function SettingsScreen() {
                   : "Hi EVA is enabled and will resume when voice command is free."
                 : "Say Hi EVA to open voice command when this is enabled."}
             </Text>
+            {wakeWordMessage ? (
+              <Text style={styles.settingDescription}>{wakeWordMessage}</Text>
+            ) : null}
           </View>
           <TouchableOpacity
             activeOpacity={0.84}
             style={[styles.toggle, wakeWordEnabled && styles.toggleActive]}
-            onPress={() =>
-              runIntegrationAction(
-                toggleWakeWord,
-                wakeWordEnabled ? "Hi EVA is off." : "Hi EVA is listening."
-              )
-            }
+            onPress={async () => {
+              setWakeWordMessage("Checking...");
+              try {
+                const result = await toggleWakeWord();
+                setWakeWordMessage(
+                  result?.ok
+                    ? (wakeWordEnabled ? "Hi EVA is off." : "Hi EVA is listening.")
+                    : (result?.message || "Hi EVA could not start. Build the Android APK first.")
+                );
+              } catch (error) {
+                setWakeWordMessage(error?.message || "Something went wrong.");
+              }
+            }}
           >
             <View style={[styles.toggleKnob, wakeWordEnabled && styles.toggleKnobActive]} />
           </TouchableOpacity>

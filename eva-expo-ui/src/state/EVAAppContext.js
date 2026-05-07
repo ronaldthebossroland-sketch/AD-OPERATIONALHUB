@@ -3102,13 +3102,26 @@ function getAssistantReminderSchedule(action = {}) {
   const dueatValue = String(action.due_at || "").trim();
   const hasDueatTime = /T\d{2}:\d{2}/.test(dueatValue);
   const timeSource = rawTime || (hasDueatTime ? dueatValue : "");
-  const parsedDateTime = parseAssistantDateTime(timeSource || null);
+
+  // Try ISO datetime first; if only HH:mm, resolve to today or tomorrow
+  let parsedDateTime = parseAssistantDateTime(timeSource || null);
+  if (!parsedDateTime && /^\d{1,2}:\d{2}$/.test(timeSource)) {
+    const [h, m] = timeSource.split(":").map(Number);
+    const candidate = new Date();
+    candidate.setHours(h, m, 0, 0);
+    const explicitlyTomorrow = dueSource.toLowerCase() === "tomorrow";
+    if (explicitlyTomorrow || candidate <= new Date()) {
+      candidate.setDate(candidate.getDate() + 1);
+    }
+    parsedDateTime = candidate;
+  }
+
   const hasSchedule = Boolean(timeSource);
 
   return {
     hasSchedule,
     due: formatAssistantActionDate(
-      dueSource || (parsedDateTime ? parsedDateTime.toISOString() : "today")
+      parsedDateTime ? parsedDateTime.toISOString() : (dueSource || "today")
     ),
     reminderTime: parsedDateTime
       ? parsedDateTime.toISOString()
