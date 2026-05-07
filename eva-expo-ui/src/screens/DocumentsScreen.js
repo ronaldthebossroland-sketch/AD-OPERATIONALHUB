@@ -385,7 +385,7 @@ function createStyles({ colors, radii, spacing, type }, compact) {
       width: 10,
       height: 10,
       borderRadius: 5,
-      backgroundColor: "#EF4444",
+      backgroundColor: colors.high,
     },
     recordingLabel: {
       ...type.body,
@@ -399,7 +399,7 @@ function createStyles({ colors, radii, spacing, type }, compact) {
       paddingHorizontal: spacing.lg,
       minHeight: 44,
       borderRadius: radii.lg,
-      backgroundColor: "#EF4444",
+      backgroundColor: colors.high,
     },
     stopButtonText: {
       color: colors.white,

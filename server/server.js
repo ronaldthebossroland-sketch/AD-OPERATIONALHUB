@@ -1435,9 +1435,11 @@ app.post("/api/eva/assistant", async (req, res) => {
       return res.status(400).json({ error: "A userMessage is required." });
     }
 
+    const supabaseUser = await getSupabaseUserFromBearer(req).catch(() => null);
+    const authUserId = supabaseUser?.id || null;
     const context = {
       ...normalizeEvaMobileAssistantRequestContext(req.body),
-      conversationMemory: await loadEvaMobileConversationMemory(userMessage),
+      conversationMemory: await loadEvaMobileConversationMemory(userMessage, authUserId),
     };
     const mockResponse = createEvaMobileMockAssistantResponse(userMessage, context);
     const hasAiKey = Boolean(process.env.GEMINI_API_KEY?.trim());
@@ -1642,7 +1644,7 @@ ${Array.from(EVA_MOBILE_ASSISTANT_INTENTS).join(", ")}
 Schema:
 {
   "reply": "short response to the user",
-  "intent": "one supported intent",
+  "intent": "one supported intent (the primary intent)",
   "action": null or {
     "type": "create_task | create_meeting | reschedule_meeting | cancel_meeting | create_reminder | create_follow_up_action | prepare_meeting_briefing",
     "title": "string",
@@ -1654,8 +1656,9 @@ Schema:
     "duration_minutes": 30,
     "attendees": ["name or team"],
     "agenda": "string",
-    "reminder_time": null or "short label"
-  }
+    "reminder_time": null or "HH:mm 24-hour time or ISO datetime"
+  },
+  "actions": null or [ array of action objects with the same fields — only for compound requests ]
 }
 
 Rules:
@@ -1672,7 +1675,9 @@ Rules:
 - If a task request does not include a usable task title, ask one follow-up question and set action to null.
 - If a reschedule or cancel request does not identify the meeting clearly enough, ask one follow-up question and set action to null.
 - If a reminder request does not include what to remember, ask one follow-up question and set action to null.
-- If a reminder request does not include a time, it is okay to create a reminder preview with reminder_time null.
+- If a reminder request includes a specific time, set reminder_time to that time in HH:mm format or ISO datetime. If no time is given, set reminder_time to null.
+- If the user clearly requests two or more distinct items in one message (e.g. "create a task AND remind me to follow up at 3 PM"), return them as an "actions" array and set "action" to null. Only use "actions" when there are genuinely two or more independent requests.
+- If the user requests only one item, use "action" only and leave "actions" null.
 - If the request is general, answer directly with action null.
 - If the user asks what happened yesterday, what you discussed before, or what conversation you had a week back, answer from conversationMemory and keep action null.
 - If conversationMemory is empty for that period, say you do not see stored EVA chat memory for that time yet.
@@ -1775,7 +1780,7 @@ function limitEvaMobileConversationMemory(memory) {
   };
 }
 
-async function loadEvaMobileConversationMemory(userMessage) {
+async function loadEvaMobileConversationMemory(userMessage, userId = null) {
   const window = getEvaMobileConversationMemoryWindow(userMessage);
 
   if (!window || !supabaseAdmin) {
@@ -1789,6 +1794,10 @@ async function loadEvaMobileConversationMemory(userMessage) {
       .eq("app_source", "eva")
       .order("created_at", { ascending: false })
       .limit(80);
+
+    if (userId) {
+      query = query.eq("user_id", userId);
+    }
 
     if (window.startIso) {
       query = query.gte("created_at", window.startIso);
@@ -1914,10 +1923,15 @@ function sanitizeEvaMobileAssistantResponse(value, fallback) {
     ? sanitizeEvaMobileAssistantAction(value.action, null)
     : fallback.action;
 
+  const actions = Array.isArray(value?.actions) && value.actions.length > 1
+    ? value.actions.map((a) => sanitizeEvaMobileAssistantAction(a, null)).filter(Boolean)
+    : null;
+
   return {
     reply,
     intent,
     action,
+    ...(actions ? { actions } : {}),
   };
 }
 
@@ -2064,9 +2078,19 @@ function createEvaMobileMockAssistantResponse(userMessage, context = {}) {
 
   if (isEvaMobileScheduleQuestion(lower)) {
     const meetings = Array.isArray(context.meetings) ? context.meetings : [];
-    const reply = meetings.length
-      ? `You have ${meetings.length} meeting${meetings.length === 1 ? "" : "s"} in EVA. The next one is ${meetings[0].title || "your next meeting"}.`
-      : "I do not see a meeting scheduled in EVA yet.";
+    const todayMeetings = meetings.filter((m) => {
+      const label = cleanText(m.date || "").toLowerCase();
+      if (label === "today") return true;
+      const parsed = new Date(m.date);
+      if (Number.isNaN(parsed.getTime())) return false;
+      const todayStart = startOfEvaLocalDay();
+      return parsed >= todayStart && parsed < addDays(todayStart, 1);
+    });
+    const reply = todayMeetings.length
+      ? `You have ${todayMeetings.length} meeting${todayMeetings.length === 1 ? "" : "s"} today. The next is ${todayMeetings[0].title || "your next meeting"}.`
+      : meetings.length
+        ? `No meetings today. You have ${meetings.length} upcoming in EVA.`
+        : "I do not see a meeting scheduled in EVA yet.";
     return {
       reply: formatEvaMobileBehaviorReply(reply, aiBehavior, "show_today_schedule"),
       intent: "show_today_schedule",
@@ -2144,7 +2168,7 @@ function createEvaMobileMockAssistantResponse(userMessage, context = {}) {
       intent: "reschedule_meeting",
       action: {
         type: "reschedule_meeting",
-        title: "Meeting",
+        title: "",
         details: "",
         priority: "medium",
         due_date: "",
@@ -2159,14 +2183,50 @@ function createEvaMobileMockAssistantResponse(userMessage, context = {}) {
   }
 
   if (/\b(cancel|delete)\b/.test(lower) && /\bmeeting|calendar|appointment\b/.test(lower)) {
+    const cancelMeetings = Array.isArray(context.meetings) ? context.meetings : [];
+    if (!cancelMeetings.length) {
+      return {
+        reply: formatEvaMobileBehaviorReply(
+          "There is no meeting to cancel. Check your schedule first.",
+          aiBehavior,
+          "cancel_meeting"
+        ),
+        intent: "cancel_meeting",
+        action: null,
+      };
+    }
+    if (cancelMeetings.length > 1) {
+      return {
+        reply: formatEvaMobileBehaviorReply(
+          "Which meeting would you like to cancel? You have multiple scheduled.",
+          aiBehavior,
+          "cancel_meeting"
+        ),
+        intent: "cancel_meeting",
+        action: null,
+      };
+    }
+    const cancelTarget = cancelMeetings[0];
     return {
       reply: formatEvaMobileBehaviorReply(
-        "I can help cancel that meeting, but I need the meeting title or time first.",
+        `Done. "${cancelTarget.title || "the meeting"}" has been removed from your schedule.`,
         aiBehavior,
         "cancel_meeting"
       ),
       intent: "cancel_meeting",
-      action: null,
+      action: {
+        type: "cancel_meeting",
+        title: cancelTarget.title || "",
+        details: "",
+        priority: "medium",
+        due_date: "",
+        meeting_date: "",
+        start_time: "",
+        duration_minutes: 30,
+        attendees: [],
+        agenda: "",
+        reminder_time: null,
+      },
     };
   }
 
@@ -2287,6 +2347,7 @@ function extractEvaMobileTaskTitle(text) {
     .replace(/^(please\s+)?(create|add|make|set)\s+(a\s+)?(task|todo|to-do|action item)\s*(for|to)?\s*/i, "")
     .replace(/\b(today|tomorrow|next week)\b/gi, "")
     .replace(/\b(?:by|due|on)\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\b/gi, "")
+    .replace(/\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/i, "")
     .trim();
 
   return cleaned ? capitalizeEvaMobileTitle(cleaned) : "";
@@ -2312,6 +2373,7 @@ function extractEvaMobileReminderTitle(text) {
   const cleaned = cleanText(text)
     .replace(/^(please\s+)?remind\s+me\s+(to|about)\s*/i, "")
     .replace(/^(please\s+)?(set|create|add)\s+(a\s+)?(reminder|alarm)\s*(for|to)?\s*/i, "")
+    .replace(/\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/i, "")
     .trim();
 
   return cleaned;

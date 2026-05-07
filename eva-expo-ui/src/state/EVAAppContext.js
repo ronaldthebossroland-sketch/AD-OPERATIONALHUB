@@ -36,7 +36,13 @@ import {
   updateSupabaseTask,
 } from "../lib/evaSupabaseStore";
 import { supabase } from "../lib/supabase";
-import { sendEvaAssistantCommand } from "../lib/evaApi";
+import { sendEvaAssistantCommand, setEvaAccessToken } from "../lib/evaApi";
+import {
+  consumeWakeWordEvent,
+  getWakeWordStatus,
+  startWakeWordListening,
+  stopWakeWordListening,
+} from "../lib/evaWakeWord";
 import {
   checkCalendarPermissions,
   checkMicrophonePermission,
@@ -60,6 +66,7 @@ import { makeTheme } from "../theme";
 
 export const EVA_TUTORIAL_COMPLETE_KEY = "eva:onboarding:tutorial-complete:v1";
 export const EVA_POST_TUTORIAL_PERMISSIONS_KEY = "eva:onboarding:permissions-asked:v1";
+const EVA_WAKE_WORD_ENABLED_KEY = "eva:pref:wake-word-enabled:v1";
 
 const NOTIFICATION_DENIED_ALERT_TITLE = "Notifications Blocked";
 const NOTIFICATION_DENIED_ALERT_BODY =
@@ -175,6 +182,8 @@ export function EVAAppProvider({ children }) {
     useState("unknown");
   const [deepgramConnectionStatus, setDeepgramConnectionStatus] =
     useState("not_connected");
+  const [wakeWordEnabled, setWakeWordEnabledState] = useState(false);
+  const [wakeWordStatus, setWakeWordStatus] = useState("off");
   const [deviceIntegrationWarning, setDeviceIntegrationWarning] = useState("");
   const [profile, setProfileState] = useState(defaultProfile);
   const [workspaces, setWorkspaces] = useState([personalWorkspace]);
@@ -283,6 +292,7 @@ export function EVAAppProvider({ children }) {
     setCurrentUser(nextUser);
     setLocalPreviewUnlocked(false);
     setAuthError("");
+    setEvaAccessToken(nextSession?.access_token || "");
 
     if (nextUser) {
       if (userChanged) {
@@ -369,6 +379,64 @@ export function EVAAppProvider({ children }) {
           console.warn("EVA permission status check failed.", error?.message || error);
         }
       });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem("eva:pref:themeMode")
+      .then((stored) => {
+        if (stored === "dark" || stored === "light") {
+          setThemeMode(stored);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    AsyncStorage.getItem(EVA_WAKE_WORD_ENABLED_KEY)
+      .then(async (stored) => {
+        if (!isMounted) {
+          return;
+        }
+
+        const enabled = stored === "true";
+        setWakeWordEnabledState(enabled);
+
+        if (!enabled) {
+          const status = await getWakeWordStatus().catch(() => ({ status: "off" }));
+          if (isMounted) {
+            setWakeWordStatus(status?.status || "off");
+          }
+          return;
+        }
+
+        const permission = await checkMicrophonePermission();
+        const permissionStatus = permissionStatusLabel(permission);
+        if (isMounted) {
+          setMicrophonePermissionStatus(permissionStatus);
+        }
+
+        if (!permission.granted) {
+          if (isMounted) {
+            setWakeWordStatus("permission_required");
+          }
+          return;
+        }
+
+        const result = await startWakeWordListening().catch((error) => ({
+          status: "unavailable",
+          message: error?.message || "Hi EVA could not start.",
+        }));
+        if (isMounted) {
+          setWakeWordStatus(result?.status || "listening");
+        }
+      })
+      .catch(() => {});
 
     return () => {
       isMounted = false;
@@ -656,6 +724,8 @@ export function EVAAppProvider({ children }) {
       }
     }).then((removeFn) => {
       removeListener = removeFn;
+    }).catch((error) => {
+      console.warn("EVA notification listener setup failed.", error?.message || error);
     });
     return () => removeListener();
   }, []);
@@ -863,6 +933,7 @@ export function EVAAppProvider({ children }) {
   function toggleThemeMode() {
     const nextMode = themeMode === "dark" ? "light" : "dark";
     setThemeMode(nextMode);
+    AsyncStorage.setItem("eva:pref:themeMode", nextMode).catch(() => {});
     savePreferencesPatch({ appearanceMode: nextMode });
   }
 
@@ -981,6 +1052,102 @@ export function EVAAppProvider({ children }) {
         : "Microphone access was not granted. You can still type commands manually."
     );
     return permission;
+  }
+
+  async function toggleWakeWord() {
+    const nextValue = !wakeWordEnabled;
+
+    if (!nextValue) {
+      setWakeWordEnabledState(false);
+      setWakeWordStatus("off");
+      await AsyncStorage.setItem(EVA_WAKE_WORD_ENABLED_KEY, "false").catch(() => {});
+      await stopWakeWordListening().catch(() => {});
+      setDeviceIntegrationWarning("Hi EVA hands-free listening is off.");
+      return { ok: true, status: "off" };
+    }
+
+    const permission = await requestMicrophonePermission();
+    const status = permissionStatusLabel(permission);
+    setMicrophonePermissionStatus(status);
+
+    if (!permission.granted) {
+      setWakeWordEnabledState(false);
+      setWakeWordStatus("permission_required");
+      setDeviceIntegrationWarning(
+        "Microphone access is needed before EVA can listen for Hi EVA."
+      );
+      await AsyncStorage.setItem(EVA_WAKE_WORD_ENABLED_KEY, "false").catch(() => {});
+      return { ok: false, status };
+    }
+
+    const result = await startWakeWordListening().catch((error) => ({
+      ok: false,
+      status: "unavailable",
+      message: error?.message || "Hi EVA could not start on this build.",
+    }));
+
+    if (result?.status === "unavailable" || result?.ok === false) {
+      setWakeWordEnabledState(false);
+      setWakeWordStatus(result?.status || "unavailable");
+      setDeviceIntegrationWarning(result?.message || "Hi EVA needs the Android test APK.");
+      await AsyncStorage.setItem(EVA_WAKE_WORD_ENABLED_KEY, "false").catch(() => {});
+      return { ok: false, status: result?.status || "unavailable" };
+    }
+
+    setWakeWordEnabledState(true);
+    setWakeWordStatus(result?.status || "listening");
+    setDeviceIntegrationWarning("Hi EVA is on. EVA will listen with a small phone notification.");
+    await AsyncStorage.setItem(EVA_WAKE_WORD_ENABLED_KEY, "true").catch(() => {});
+    return { ok: true, status: result?.status || "listening" };
+  }
+
+  async function pauseWakeWordListening() {
+    if (!wakeWordEnabled) {
+      return { ok: true, status: "off" };
+    }
+
+    const result = await stopWakeWordListening().catch(() => ({ status: "paused" }));
+    setWakeWordStatus("paused");
+    return result;
+  }
+
+  async function resumeWakeWordListening(options = {}) {
+    if (!wakeWordEnabled) {
+      return { ok: true, status: "off" };
+    }
+
+    const permission = await checkMicrophonePermission();
+    const status = permissionStatusLabel(permission);
+    setMicrophonePermissionStatus(status);
+
+    if (!permission.granted) {
+      setWakeWordStatus("permission_required");
+      if (!options.silent) {
+        setDeviceIntegrationWarning("Microphone access is needed for Hi EVA.");
+      }
+      return { ok: false, status };
+    }
+
+    const result = await startWakeWordListening().catch((error) => ({
+      ok: false,
+      status: "unavailable",
+      message: error?.message || "Hi EVA could not restart.",
+    }));
+    setWakeWordStatus(result?.status || "listening");
+    if (result?.ok === false && !options.silent) {
+      setDeviceIntegrationWarning(result.message);
+    }
+    return result;
+  }
+
+  async function consumeWakeWordActivation() {
+    const event = await consumeWakeWordEvent().catch(() => null);
+    if (!event?.detected) {
+      return false;
+    }
+
+    setWakeWordStatus("heard");
+    return true;
   }
 
   async function requestPostTutorialPermissions() {
@@ -1815,7 +1982,9 @@ export function EVAAppProvider({ children }) {
     const userMessage = { id: `${messageId}-user`, role: "user", content };
     const todayKey = getLocalDayKey();
     const isNewChatDay = chatDay !== todayKey;
-    const recentMessages = isNewChatDay ? initialMessages : chatMessages;
+    const recentMessages = isNewChatDay
+      ? [...initialMessages, ...chatMessages.slice(-3)]
+      : chatMessages;
     const targetChatId = isNewChatDay ? null : chatId;
     let reply;
 
@@ -1847,7 +2016,9 @@ export function EVAAppProvider({ children }) {
         backend: "connected",
         ai: response?.mode === "ai" ? "gemini" : "fallback",
       });
-      reply = adaptAssistantReply(await applyAssistantRouteResult(response, content), {
+      const rawReply = await applyAssistantRouteResult(response, content);
+      await applyCompoundActions(response?.actions, content);
+      reply = adaptAssistantReply(rawReply, {
         intent: response?.intent,
         action: response?.action,
       });
@@ -1875,7 +2046,7 @@ export function EVAAppProvider({ children }) {
     const lower = content.toLowerCase();
     let reply = "I understand. I have captured that in the preview flow.";
 
-    if (/remind|reminder|alarm/.test(lower)) {
+    if (/\b(remind|reminder|alarm)\b/.test(lower)) {
       const reminderTitle = extractReminderTitle(content);
       if (!reminderTitle) {
         reply = "Sure. What should I remind you about?";
@@ -1896,24 +2067,34 @@ export function EVAAppProvider({ children }) {
       reply = pendingTasks.length
         ? `${pendingTasks.length} task${pendingTasks.length === 1 ? "" : "s"} need attention. Start with ${pendingTasks[0].title}.`
         : "Your EVA task list is clear right now.";
-    } else if (/summari[sz]e|summary|notes|document|knowledge/.test(lower)) {
+    } else if (/\b(summari[sz]e|summary|notes|document|knowledge)\b/.test(lower)) {
       const latest = documents[0];
       reply = latest
         ? `Summary of "${latest.title}": ${latest.summary}`
         : "There are no notes yet. Add a document or paste notes into Knowledge first.";
-    } else if (/brief|briefing|prepare my next move|next move/.test(lower)) {
+    } else if (/\b(brief|briefing)\b|\bprepare my next move\b|\bnext move\b/.test(lower)) {
       const result = await prepareMeetingBriefing({ title: content });
       reply = result.reply;
-    } else if (/reschedule|move|shift/.test(lower)) {
-      const target = visibleMeetings[0];
-      if (target) {
-        const updated = rescheduleMeeting(target.id, {
+    } else if (/\b(cancel|delete)\b/.test(lower) && /\b(meeting|calendar|appointment)\b/.test(lower)) {
+      if (!visibleMeetings.length) {
+        reply = "There is no meeting to cancel. Check your schedule first.";
+      } else if (visibleMeetings.length > 1) {
+        reply = "Which meeting would you like to cancel? Please be more specific.";
+      } else {
+        deleteMeeting(visibleMeetings[0].id);
+        reply = `Done. "${visibleMeetings[0].title}" has been removed from your schedule.`;
+      }
+    } else if (/\b(reschedule|move|shift)\b/.test(lower) && /\b(meeting|calendar|appointment)\b/.test(lower)) {
+      if (!visibleMeetings.length) {
+        reply = "There is no meeting to reschedule yet. Ask me to create one first.";
+      } else if (visibleMeetings.length > 1) {
+        reply = "Which meeting would you like to reschedule? Please be more specific.";
+      } else {
+        const updated = rescheduleMeeting(visibleMeetings[0].id, {
           date: extractMeetingDate(content),
           time: extractTime(content, "2:00 PM"),
         });
         reply = `I rescheduled "${updated.title}" to ${updated.date} at ${updated.time}.`;
-      } else {
-        reply = "There is no meeting to reschedule yet. Ask me to create one first.";
       }
     } else if (isTaskIntent(lower)) {
       const taskTitle = extractTaskTitle(content);
@@ -1946,7 +2127,7 @@ export function EVAAppProvider({ children }) {
           meeting
         );
       }
-    } else if (/question|what is|how do|explain|ask/.test(lower)) {
+    } else if (/\b(question|what is|how do|explain)\b/.test(lower)) {
       reply =
         "Here is the clean answer: EVA can reason through your command, then turn it into tasks, meetings, reminders, summaries, or briefings in this preview.";
     }
@@ -2069,9 +2250,11 @@ export function EVAAppProvider({ children }) {
     }
 
     if (actionType === "reschedule_meeting") {
-      const target = findMeetingForAction(action) || visibleMeetings[0];
+      const target = findMeetingForAction(action);
       if (!target) {
-        return "There is no meeting to reschedule yet. Ask me to create one first.";
+        return action?.title
+          ? `I couldn't find a meeting called "${action.title}" to reschedule.`
+          : "Which meeting would you like to reschedule? Please be more specific.";
       }
 
       const updated = rescheduleMeeting(target.id, {
@@ -2085,7 +2268,59 @@ export function EVAAppProvider({ children }) {
       );
     }
 
+    if (actionType === "cancel_meeting") {
+      const target = findMeetingForAction(action);
+      if (!target) {
+        return action?.title
+          ? `I couldn't find a meeting called "${action.title}" in your schedule.`
+          : "Which meeting would you like to cancel? Please be more specific.";
+      }
+      deleteMeeting(target.id);
+      return response?.reply || `Done. "${target.title}" has been removed from your schedule.`;
+    }
+
     return fallbackReply;
+  }
+
+  async function applyCompoundActions(actions, content) {
+    if (!Array.isArray(actions) || !actions.length) return;
+    for (const extra of actions) {
+      const type = normalizeAssistantActionType(String(extra?.type || "").toLowerCase());
+      if (type === "create_task" || type === "create_follow_up_action") {
+        const title = String(extra.title || "").trim() || extractTaskTitle(content);
+        if (title) {
+          addTask({
+            title,
+            detail: extra.details || extra.detail || "",
+            priority: displayPriorityFromAction(extra.priority),
+            due: formatAssistantActionDate(extra.due_date || extra.due),
+          });
+        }
+      } else if (type === "create_meeting") {
+        const startTime = extra.start_time || extra.startTime || extra.time;
+        const title = String(extra.title || "").trim();
+        if (startTime && title) {
+          await addMeeting({
+            title,
+            date: formatAssistantActionDate(extra.meeting_date || extra.date),
+            time: formatAssistantActionTime(startTime),
+            attendees: formatAssistantAttendees(extra.attendees || extra.participants),
+            briefing: extra.agenda || extra.briefing || extra.details || "",
+          });
+        }
+      } else if (type === "create_reminder") {
+        const title = String(extra.title || "").trim() || extractReminderTitle(content);
+        const schedule = getAssistantReminderSchedule(extra);
+        if (title && schedule.hasSchedule) {
+          addReminder({
+            title,
+            details: extra.details || "",
+            due: schedule.due,
+            reminder_time: schedule.reminderTime,
+          });
+        }
+      }
+    }
   }
 
   function buildAssistantContext() {
@@ -2102,6 +2337,7 @@ export function EVAAppProvider({ children }) {
       },
       aiBehavior,
       voiceMode,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       notificationsEnabled: notificationEnabled,
       phoneCalendarSyncEnabled,
       defaultMeetingReminderMinutes,
@@ -2109,19 +2345,19 @@ export function EVAAppProvider({ children }) {
       notificationPermissionStatus,
       microphonePermissionStatus,
       deepgramConnectionStatus,
-      tasks: visibleTasks.slice(0, 10).map(({ title, priority, status, due }) => ({
+      tasks: visibleTasks.slice(0, 8).map(({ title, priority, status, due }) => ({
         title,
         priority,
         status,
         due,
       })),
-      meetings: visibleMeetings.slice(0, 10).map(({ title, date, time, attendees }) => ({
+      meetings: visibleMeetings.slice(0, 8).map(({ title, date, time, attendees }) => ({
         title,
         date,
         time,
         attendees,
       })),
-      reminders: visibleReminders.slice(0, 10).map(({ title, due }) => ({
+      reminders: visibleReminders.slice(0, 8).map(({ title, due }) => ({
         title,
         due,
       })),
@@ -2205,6 +2441,8 @@ export function EVAAppProvider({ children }) {
     voiceMode,
     voiceModeOptions,
     notificationEnabled,
+    wakeWordEnabled,
+    wakeWordStatus,
     phoneCalendarSyncEnabled,
     defaultMeetingReminderMinutes,
     calendarPermissionStatus,
@@ -2229,6 +2467,10 @@ export function EVAAppProvider({ children }) {
     setAiBehavior,
     setVoiceMode,
     toggleNotifications,
+    toggleWakeWord,
+    pauseWakeWordListening,
+    resumeWakeWordListening,
+    consumeWakeWordActivation,
     togglePhoneCalendarSync,
     testCalendarPermission,
     testMicrophonePermission,
@@ -2686,6 +2928,8 @@ function proactiveSuggestionFor(actionType) {
       return "protect one open block for preparation before your highest-stakes meeting.";
     case "show_pending_tasks":
       return "clear or delegate the highest-priority open task first.";
+    case "summarize_notes":
+      return "turn the key decisions and risks into a task or briefing for immediate action.";
     default:
       return "";
   }
@@ -2708,6 +2952,9 @@ function inferLocalActionType(text) {
   if (/\b(brief|briefing|prepare my next move|next move)\b/.test(lower)) {
     return "prepare_meeting_briefing";
   }
+  if (/\b(cancel|delete)\b/.test(lower) && /\b(meeting|calendar|appointment)\b/.test(lower)) {
+    return "cancel_meeting";
+  }
   if (/\b(reschedule|move|shift)\b/.test(lower)) {
     return "reschedule_meeting";
   }
@@ -2727,7 +2974,7 @@ function isTaskIntent(text) {
 }
 
 function isMeetingIntent(text) {
-  return /\b(meeting|schedule|calendar|appointment|sync)\b/.test(text);
+  return /\b(meeting|schedule|calendar|appointment)\b/.test(text);
 }
 
 function isScheduleQuestion(text) {
@@ -2789,7 +3036,7 @@ function extractTime(text, fallback = "10:00 AM") {
     return fallback;
   }
   const minutes = match[2] || "00";
-  const period = (match[3] || (hour >= 8 && hour <= 11 ? "AM" : "PM"))
+  const period = (match[3] || (hour >= 6 && hour <= 11 ? "AM" : "PM"))
     .replace(/\./g, "")
     .toUpperCase();
   const normalizedHour = hour > 12 ? hour - 12 : hour;
@@ -2846,20 +3093,17 @@ function formatAssistantActionDate(value) {
 }
 
 function getAssistantReminderSchedule(action = {}) {
-  const dueSource =
-    action.due_date ||
-    action.due ||
-    action.date ||
-    action.reminder_date ||
-    "";
-  const timeSource =
-    action.reminder_time ||
-    action.time ||
-    action.start_time ||
-    action.due_at ||
-    "";
-  const parsedDateTime = parseAssistantDateTime(action.due_at || action.reminder_time);
-  const hasSchedule = Boolean(String(dueSource || timeSource).trim()) || Boolean(parsedDateTime);
+  const dueSource = String(
+    action.due_date || action.due || action.date || action.reminder_date || ""
+  ).trim();
+  const rawTime = String(
+    action.reminder_time || action.time || action.start_time || ""
+  ).trim();
+  const dueatValue = String(action.due_at || "").trim();
+  const hasDueatTime = /T\d{2}:\d{2}/.test(dueatValue);
+  const timeSource = rawTime || (hasDueatTime ? dueatValue : "");
+  const parsedDateTime = parseAssistantDateTime(timeSource || null);
+  const hasSchedule = Boolean(timeSource);
 
   return {
     hasSchedule,
@@ -2973,6 +3217,7 @@ function extractTaskTitle(text) {
     .replace(/^(please\s+)?(create|add|make|set)\s+(a\s+)?(task|todo|to-do|follow-up|follow up|action item)\s*(for|to)?\s*/i, "")
     .replace(/\b(today|tomorrow|next week)\b/gi, "")
     .replace(/\b(?:by|due|on)\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\b/gi, "")
+    .replace(/\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/i, "")
     .trim();
   return cleaned ? capitalizeTitle(cleaned) : "";
 }
@@ -3028,6 +3273,7 @@ function extractReminderTitle(text) {
   const cleaned = text
     .replace(/^(please\s+)?remind\s+me\s+(to|about)\s*/i, "")
     .replace(/^(please\s+)?(set|create|add)\s+(a\s+)?(reminder|alarm)\s*(for|to)?\s*/i, "")
+    .replace(/\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/i, "")
     .trim();
   return cleaned ? capitalizeTitle(cleaned) : "";
 }

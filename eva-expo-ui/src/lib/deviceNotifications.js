@@ -15,6 +15,26 @@ const EXPO_GO_NOTIFICATION_MESSAGE =
   "Notifications need a development build on Android. EVA still saves your items in Expo Go.";
 let notificationHandlerReady = false;
 
+// Register the foreground notification handler as early as possible so it is
+// in place before any notification response event fires (e.g. cold-start tap).
+if (!isExpoGoRuntime()) {
+  import("expo-notifications")
+    .then((Notifications) => {
+      if (!notificationHandlerReady) {
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowBanner: true,
+            shouldShowList: true,
+            shouldPlaySound: true,
+            shouldSetBadge: false,
+          }),
+        });
+        notificationHandlerReady = true;
+      }
+    })
+    .catch(() => {});
+}
+
 export async function ensureEvaReminderChannel() {
   if (Platform.OS !== "android") {
     return null;

@@ -33,7 +33,7 @@ const VOICE_PERMISSION_MESSAGE =
 const VOICE_TRANSCRIPTION_ERROR =
   "I couldn't transcribe that clearly. Please try again or type your command.";
 
-export function AssistantScreen() {
+export function AssistantScreen({ wakeSignal = 0 }) {
   const {
     theme,
     assistantPrompts,
@@ -41,6 +41,8 @@ export function AssistantScreen() {
     handleAssistantCommand,
     addAssistantNotice,
     updateVoiceIntegrationStatus,
+    pauseWakeWordListening,
+    resumeWakeWordListening,
     voiceMode,
   } = useEVAApp();
   const { width } = useWindowDimensions();
@@ -54,6 +56,9 @@ export function AssistantScreen() {
   const scrollRef = useRef(null);
   const autoStopRef = useRef(null);
   const stoppingRef = useRef(false);
+  const pressHeldRef = useRef(false);
+  const recordingStartedRef = useRef(false);
+  const lastWakeSignalRef = useRef(0);
   const audioRecorder = useAudioRecorder(VOICE_RECORDING_OPTIONS);
   const recorderState = useAudioRecorderState(audioRecorder, 250);
   const clearVoiceTimer = useCallback(() => {
@@ -70,6 +75,24 @@ export function AssistantScreen() {
       stopEvaSpeech();
     };
   }, [audioRecorder, clearVoiceTimer]);
+
+  useEffect(() => {
+    if (!wakeSignal || wakeSignal === lastWakeSignalRef.current) {
+      return undefined;
+    }
+    if (voiceState !== "idle") {
+      return undefined;
+    }
+
+    lastWakeSignalRef.current = wakeSignal;
+    addAssistantNotice("I'm listening. Tell EVA what to do.");
+    const timer = setTimeout(() => {
+      beginVoiceRecording().catch(() => {});
+    }, 550);
+
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wakeSignal, voiceState]);
 
   async function submitMessage(text = draft) {
     const content = text.trim();
@@ -89,22 +112,29 @@ export function AssistantScreen() {
     }
   }
 
-  async function handleMicPress() {
+  async function handleMicPressIn() {
     if (voiceState === "transcribing" || voiceState === "processing") {
       return;
     }
-
-    if (voiceState === "listening" || recorderState.isRecording) {
-      await stopAndTranscribe();
-      return;
-    }
-
+    pressHeldRef.current = true;
     await beginVoiceRecording();
+    if (!pressHeldRef.current && recordingStartedRef.current) {
+      stopAndTranscribe().catch(() => {});
+    }
+  }
+
+  function handleMicPressOut() {
+    pressHeldRef.current = false;
+    if (voiceState === "listening" || recorderState.isRecording) {
+      stopAndTranscribe().catch(() => {});
+    }
   }
 
   async function beginVoiceRecording() {
+    recordingStartedRef.current = false;
     setStatus("Requesting microphone");
     setVoiceMessage("");
+    await pauseWakeWordListening?.().catch(() => {});
 
     const permission = await requestMicrophonePermission();
     const permissionStatus = permissionStatusLabel(permission);
@@ -119,15 +149,17 @@ export function AssistantScreen() {
       setVoiceState("idle");
       setVoiceMessage(VOICE_PERMISSION_MESSAGE);
       addAssistantNotice(VOICE_PERMISSION_MESSAGE);
+      resumeWakeWordListening?.({ silent: true }).catch(() => {});
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
       return;
     }
 
     try {
       await startRecording(audioRecorder);
+      recordingStartedRef.current = true;
       setVoiceState("listening");
       setStatus("Listening");
-      setVoiceMessage("Listening... tap the mic again when you are done.");
+      setVoiceMessage("Listening... release the button when you are done.");
       clearVoiceTimer();
       autoStopRef.current = setTimeout(() => {
         stopAndTranscribe({ autoStopped: true }).catch(() => {});
@@ -136,6 +168,7 @@ export function AssistantScreen() {
       setStatus("Ready");
       setVoiceState("idle");
       setVoiceMessage("Voice recording could not start. You can still type commands manually.");
+      resumeWakeWordListening?.({ silent: true }).catch(() => {});
       updateVoiceIntegrationStatus({
         deepgramStatus: "not_connected",
         message: error?.message || "Voice recording could not start.",
@@ -206,12 +239,14 @@ export function AssistantScreen() {
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
     } finally {
       stoppingRef.current = false;
+      recordingStartedRef.current = false;
       if (!submittedTranscript) {
         setVoiceState("idle");
         setStatus("Ready");
       } else {
         setVoiceState("idle");
       }
+      resumeWakeWordListening?.({ silent: true }).catch(() => {});
     }
   }
 
@@ -273,7 +308,8 @@ export function AssistantScreen() {
         />
       </View>
       <FloatingMic
-        onPress={handleMicPress}
+        onPressIn={handleMicPressIn}
+        onPressOut={handleMicPressOut}
         state={voiceState}
         disabled={voiceState === "transcribing" || voiceState === "processing"}
       />
@@ -310,9 +346,7 @@ function createStyles({ colors, radii, spacing, type }, compact) {
       paddingBottom: spacing.md,
       borderTopWidth: 1,
       borderTopColor: colors.border,
-      backgroundColor: colors.isDark
-        ? "rgba(6, 11, 24, 0.94)"
-        : "rgba(249, 250, 251, 0.94)",
+      backgroundColor: colors.bg + "F0",
     },
     promptWrap: {
       marginTop: spacing.lg,
@@ -332,9 +366,7 @@ function createStyles({ colors, radii, spacing, type }, compact) {
     },
     userBubble: {
       alignSelf: "flex-end",
-      backgroundColor: colors.isDark
-        ? "rgba(124, 58, 237, 0.16)"
-        : "rgba(124, 58, 237, 0.1)",
+      backgroundColor: colors.violet + (colors.isDark ? "29" : "1A"),
     },
     bubbleLabel: {
       ...type.micro,

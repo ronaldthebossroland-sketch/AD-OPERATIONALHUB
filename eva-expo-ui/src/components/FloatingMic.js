@@ -4,13 +4,13 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useEVAApp } from "../state/EVAAppContext";
 
-export function FloatingMic({ disabled = false, onPress, state = "idle" }) {
+export function FloatingMic({ disabled = false, onPressIn, onPressOut, state = "idle" }) {
   const { theme } = useEVAApp();
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const listening = state === "listening";
   const working = state === "transcribing" || state === "processing";
-  const iconName = listening ? "stop" : working ? "sync" : "mic";
+  const iconName = working ? "sync" : "mic";
   const gradientColors = listening
     ? [colors.high, colors.amber, colors.electric]
     : working
@@ -22,7 +22,8 @@ export function FloatingMic({ disabled = false, onPress, state = "idle" }) {
       activeOpacity={0.86}
       disabled={disabled}
       style={[styles.wrap, disabled && styles.disabled]}
-      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
     >
       <LinearGradient
         colors={gradientColors}
@@ -63,10 +64,10 @@ function createStyles({ colors, shadows }) {
       justifyContent: "center",
       borderWidth: 1,
       borderColor: colors.glassBorder,
-      backgroundColor: colors.isDark ? "rgba(6, 11, 24, 0.36)" : "rgba(255, 255, 255, 0.38)",
+      backgroundColor: colors.glassSurface,
     },
     innerListening: {
-      backgroundColor: colors.isDark ? "rgba(239, 68, 68, 0.22)" : "rgba(239, 68, 68, 0.24)",
+      backgroundColor: colors.high + "38",
     },
     disabled: {
       opacity: 0.72,

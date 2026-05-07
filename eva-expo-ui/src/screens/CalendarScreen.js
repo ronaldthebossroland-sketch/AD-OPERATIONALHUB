@@ -402,11 +402,11 @@ function createStyles({ colors, radii, spacing, type }, compact) {
       color: colors.text,
     },
     actionButtonDanger: {
-      borderColor: "#EF444466",
-      backgroundColor: "#EF444412",
+      borderColor: colors.high + "66",
+      backgroundColor: colors.high + "12",
     },
     actionButtonDangerText: {
-      color: "#EF4444",
+      color: colors.high,
     },
   });
 }

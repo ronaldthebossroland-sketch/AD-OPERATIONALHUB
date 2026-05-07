@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Platform,
   StatusBar,
   StyleSheet,
@@ -44,11 +45,13 @@ export default function App() {
 function AppShell() {
   const [activeTab, setActiveTab] = useState("home");
   const [showTutorial, setShowTutorial] = useState(false);
+  const [assistantWakeSignal, setAssistantWakeSignal] = useState(0);
   const permissionFlowStartedRef = useRef(false);
   const {
     authLoading,
     currentUser,
     localPreviewUnlocked,
+    consumeWakeWordActivation,
     requestPostTutorialPermissions,
     theme,
   } = useEVAApp();
@@ -146,6 +149,36 @@ function AppShell() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return undefined;
+    }
+
+    let active = true;
+    const checkWakeWord = async () => {
+      const detected = await consumeWakeWordActivation?.();
+      if (!active || !detected) {
+        return;
+      }
+      setActiveTab("assistant");
+      setAssistantWakeSignal(Date.now());
+    };
+
+    checkWakeWord();
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        checkWakeWord();
+      }
+    });
+    const interval = setInterval(checkWakeWord, 2000);
+
+    return () => {
+      active = false;
+      subscription.remove();
+      clearInterval(interval);
+    };
+  }, [consumeWakeWordActivation, isAuthenticated]);
+
   const screen = useMemo(() => {
     if (authLoading) {
       return <AuthLoading colors={colors} />;
@@ -157,7 +190,7 @@ function AppShell() {
 
     switch (activeTab) {
       case "assistant":
-        return <AssistantScreen />;
+        return <AssistantScreen wakeSignal={assistantWakeSignal} />;
       case "tasks":
         return <TasksScreen />;
       case "calendar":
@@ -170,7 +203,7 @@ function AppShell() {
       default:
         return <HomeScreen onNavigate={handleTabChange} />;
     }
-  }, [activeTab, authLoading, colors, handleTabChange, isAuthenticated]);
+  }, [activeTab, assistantWakeSignal, authLoading, colors, handleTabChange, isAuthenticated]);
 
   return (
     <LinearGradient
