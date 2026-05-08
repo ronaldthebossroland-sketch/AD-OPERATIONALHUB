@@ -2205,11 +2205,18 @@ export function EVAAppProvider({ children }) {
         return response?.reply || "Sure. What should I name this task?";
       }
 
+      const rawDue = String(action.due_date || action.due || action.due_at || "").trim();
+      if (!rawDue) {
+        return response?.reply && /\bwhen\b|\bdue\b|\bpriority\b/i.test(response.reply)
+          ? response.reply
+          : `Got it. When should "${title}" be done by? And what priority — low, medium, or high?`;
+      }
+
       const task = addTask({
         title,
         detail: action.details || action.detail || content,
         priority: displayPriorityFromAction(action.priority),
-        due: formatAssistantActionDate(action.due_date || action.due || action.due_at),
+        due: formatAssistantActionDate(rawDue),
       });
 
       return (
@@ -2233,8 +2240,17 @@ export function EVAAppProvider({ children }) {
       const durationMinutes =
         action.duration_minutes || action.durationMinutes || action.duration || 30;
       const rawTitle = String(action.title || action.meeting_title || "").trim();
+      const resolvedTitle = isGenericMeetingTitle(rawTitle)
+        ? (extractMeetingTitle(content) || "")
+        : rawTitle;
+      if (!resolvedTitle) {
+        return response?.reply && /\bwho\b|\bwhat\b/i.test(response.reply)
+          ? response.reply
+          : "Sure. Who is this meeting with, or what's it about?";
+      }
+
       const meeting = await addMeeting({
-        title: isGenericMeetingTitle(rawTitle) ? (extractMeetingTitle(content) || "Meeting") : rawTitle,
+        title: resolvedTitle,
         date: formatAssistantActionDate(
           action.meeting_date || action.meetingDate || action.date || action.day
         ),
@@ -2273,9 +2289,9 @@ export function EVAAppProvider({ children }) {
 
       const reminderSchedule = getAssistantReminderSchedule(action);
       if (!reminderSchedule.hasSchedule) {
-        return response?.reply && !/set|created|done/i.test(response.reply)
+        return response?.reply && /\bwhen\b/i.test(response.reply)
           ? response.reply
-          : `Sure. When should I remind you about ${title}?`;
+          : `Sure. When would you like to be reminded about "${title}"?`;
       }
 
       const reminder = addReminder({
