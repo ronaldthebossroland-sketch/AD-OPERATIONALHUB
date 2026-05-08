@@ -36,10 +36,9 @@ import {
   updateSupabaseTask,
 } from "../lib/evaSupabaseStore";
 import { supabase } from "../lib/supabase";
-import { sendEvaAssistantCommand, setEvaAccessToken } from "../lib/evaApi";
+import { sendEvaAssistantCommand, streamEvaAssistantCommand, setEvaAccessToken } from "../lib/evaApi";
 import {
   consumeWakeWordEvent,
-  getWakeWordStatus,
   startWakeWordListening,
   stopWakeWordListening,
 } from "../lib/evaWakeWord";
@@ -396,51 +395,9 @@ export function EVAAppProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
-
-    AsyncStorage.getItem(EVA_WAKE_WORD_ENABLED_KEY)
-      .then(async (stored) => {
-        if (!isMounted) {
-          return;
-        }
-
-        const enabled = stored === "true";
-        setWakeWordEnabledState(enabled);
-
-        if (!enabled) {
-          const status = await getWakeWordStatus().catch(() => ({ status: "off" }));
-          if (isMounted) {
-            setWakeWordStatus(status?.status || "off");
-          }
-          return;
-        }
-
-        const permission = await checkMicrophonePermission();
-        const permissionStatus = permissionStatusLabel(permission);
-        if (isMounted) {
-          setMicrophonePermissionStatus(permissionStatus);
-        }
-
-        if (!permission.granted) {
-          if (isMounted) {
-            setWakeWordStatus("permission_required");
-          }
-          return;
-        }
-
-        const result = await startWakeWordListening().catch((error) => ({
-          status: "unavailable",
-          message: error?.message || "Hi EVA could not start.",
-        }));
-        if (isMounted) {
-          setWakeWordStatus(result?.status || "listening");
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      isMounted = false;
-    };
+    AsyncStorage.removeItem(EVA_WAKE_WORD_ENABLED_KEY).catch(() => {});
+    stopWakeWordListening().catch(() => {});
+    return undefined;
   }, []);
 
   useEffect(() => {
@@ -2042,6 +1999,74 @@ export function EVAAppProvider({ children }) {
     return assistantMessage.content;
   }
 
+  async function handleAssistantCommandStreaming(rawText, onSentence) {
+    const content = rawText.trim();
+    if (!content) return "";
+
+    const messageId = makeLocalRecordId("message");
+    const userMessage = { id: `${messageId}-user`, role: "user", content };
+    const todayKey = getLocalDayKey();
+    const isNewChatDay = chatDay !== todayKey;
+    const recentMessages = isNewChatDay
+      ? [...initialMessages, ...chatMessages.slice(-3)]
+      : chatMessages;
+    const targetChatId = isNewChatDay ? null : chatId;
+    let reply;
+
+    if (isNewChatDay) {
+      setChatDay(todayKey);
+      setChatId(null);
+    }
+
+    setChatMessages((current) => [
+      ...(isNewChatDay ? initialMessages : current),
+      userMessage,
+    ]);
+    setAssistantConnection({ backend: "checking", ai: "checking" });
+
+    try {
+      await streamEvaAssistantCommand(
+        {
+          userMessage: content,
+          context: buildAssistantContext(),
+          messages: [...recentMessages, userMessage]
+            .slice(-12)
+            .map(({ role, content: c }) => ({ role, content: c })),
+        },
+        onSentence,
+        async (structured) => {
+          debugEvaFlow("assistant: stream response", summarizeAssistantResponse(structured));
+          setAssistantConnection({
+            backend: "connected",
+            ai: structured?.mode === "ai" ? "gemini" : "fallback",
+          });
+          const rawReply = await applyAssistantRouteResult(structured, content);
+          await applyCompoundActions(structured?.actions, content);
+          reply = adaptAssistantReply(rawReply, {
+            intent: structured?.intent,
+            action: structured?.action,
+          });
+        }
+      );
+    } catch (error) {
+      console.warn("EVA stream backend unavailable. Using local preview logic.", error?.message || error);
+      setAssistantConnection({ backend: "offline", ai: "fallback" });
+      reply = adaptAssistantReply(await runLocalAssistantCommand(content), {
+        intent: inferLocalActionType(content),
+      });
+    }
+
+    const assistantMessage = {
+      id: `${messageId}-eva`,
+      role: "assistant",
+      content: reply || "I understand. I have captured that in the preview flow.",
+    };
+
+    setChatMessages((current) => [...current, assistantMessage]);
+    saveChatMessages([userMessage, assistantMessage], targetChatId);
+    return assistantMessage.content;
+  }
+
   async function runLocalAssistantCommand(content) {
     const lower = content.toLowerCase();
     let reply = "I understand. I have captured that in the preview flow.";
@@ -2502,6 +2527,7 @@ export function EVAAppProvider({ children }) {
     addTranscript,
     addReminder,
     handleAssistantCommand,
+    handleAssistantCommandStreaming,
     addAssistantNotice,
     updateVoiceIntegrationStatus,
     showVoiceModeComingSoon,

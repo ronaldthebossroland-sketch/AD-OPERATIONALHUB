@@ -7,7 +7,7 @@ import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "crypto";
 import { createServer } from "http";
 import { DeepgramClient } from "@deepgram/sdk";
 import { WebSocket, WebSocketServer } from "ws";
-import { askAI } from "./aiService.js";
+import { askAI, askAISpeechStream } from "./aiService.js";
 
 dotenv.config({ path: "./server/.env" });
 
@@ -1482,6 +1482,116 @@ app.post("/api/eva/assistant", async (req, res) => {
   }
 });
 
+app.post("/api/eva/assistant/stream", async (req, res) => {
+  try {
+    const userMessage = cleanText(
+      req.body.userMessage || req.body.user_message || req.body.message
+    ).slice(0, 4000);
+
+    if (!userMessage) {
+      return res.status(400).json({ error: "A userMessage is required." });
+    }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    function sseEvent(data) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+
+    const supabaseUser = await getSupabaseUserFromBearer(req).catch(() => null);
+    const authUserId = supabaseUser?.id || null;
+    const context = {
+      ...normalizeEvaMobileAssistantRequestContext(req.body),
+      conversationMemory: await loadEvaMobileConversationMemory(userMessage, authUserId),
+    };
+    const mockResponse = createEvaMobileMockAssistantResponse(userMessage, context);
+    const hasAiKey = Boolean(process.env.GEMINI_API_KEY?.trim());
+
+    if (!hasAiKey) {
+      const text = mockResponse.reply || "I am ready for your command.";
+      for (const sentence of splitReplyIntoSentences(text)) {
+        sseEvent({ type: "sentence", text: sentence });
+      }
+      sseEvent({ type: "done", fullText: text, structured: { ...mockResponse, mode: "mock" } });
+      return res.end();
+    }
+
+    try {
+      const speechSentences = [];
+
+      // Call 1: plain-text speech stream — sentences emitted as Gemini generates them
+      const speechPromise = askAISpeechStream(
+        buildEvaMobileAssistantSpeechPrompt(userMessage, context),
+        (sentence) => {
+          speechSentences.push(sentence);
+          if (!res.writableEnded) {
+            sseEvent({ type: "sentence", text: sentence });
+          }
+        }
+      ).catch((err) => {
+        console.warn("EVA speech stream failed:", err?.message || err);
+      });
+
+      // Call 2: structured JSON — provides actions + chat reply, runs in parallel
+      const structuredPromise = askAI(
+        buildEvaMobileAssistantPrompt(userMessage, context)
+      ).catch((err) => {
+        console.warn("EVA structured call failed:", err?.message || err);
+        return null;
+      });
+
+      const [, structuredText] = await Promise.all([speechPromise, structuredPromise]);
+
+      let structured = null;
+      if (structuredText) {
+        const parsed = sanitizeEvaMobileAssistantResponse(
+          parseJsonObject(structuredText),
+          mockResponse
+        );
+        if (isEvaMobileConversationMemoryQuestion(userMessage.toLowerCase())) {
+          parsed.intent = "general_question";
+          parsed.action = null;
+        }
+        structured = { ...parsed, mode: "ai" };
+        logEvaAssistantDebugResponse(structured);
+      }
+
+      // Fallback: if speech stream produced nothing, speak the structured reply
+      if (speechSentences.length === 0) {
+        const fallbackText = structured?.reply || mockResponse.reply || "I am ready for your command.";
+        for (const s of splitReplyIntoSentences(fallbackText)) {
+          if (!res.writableEnded) sseEvent({ type: "sentence", text: s });
+          speechSentences.push(s);
+        }
+      }
+
+      sseEvent({
+        type: "done",
+        fullText: speechSentences.join(" "),
+        structured: structured || { ...mockResponse, mode: "mock" },
+      });
+    } catch (aiError) {
+      console.warn("EVA stream route used mock fallback:", aiError?.message || aiError);
+      const text = mockResponse.reply || "I am ready for your command.";
+      for (const sentence of splitReplyIntoSentences(text)) {
+        sseEvent({ type: "sentence", text: sentence });
+      }
+      sseEvent({ type: "done", fullText: text, structured: { ...mockResponse, mode: "mock" } });
+    }
+
+    res.end();
+  } catch (error) {
+    console.error("EVA stream assistant route error:", error);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: "EVA could not process that command right now." });
+    }
+    res.end();
+  }
+});
+
 app.post(
   "/api/eva/transcribe",
   express.raw({
@@ -1614,6 +1724,24 @@ app.post("/api/eva/speak", async (req, res) => {
   }
 });
 
+function splitReplyIntoSentences(text) {
+  if (!text) return [];
+  const results = [];
+  let buf = "";
+  for (let i = 0; i < text.length; i++) {
+    buf += text[i];
+    const nextChar = text[i + 1];
+    if (".!?".includes(text[i]) && (i + 1 >= text.length || nextChar === " " || nextChar === "\n")) {
+      const s = buf.trim();
+      if (s.length > 2) results.push(s);
+      buf = "";
+    }
+  }
+  const rem = buf.trim();
+  if (rem.length > 2) results.push(rem);
+  return results.length > 0 ? results : [text.trim()].filter(Boolean);
+}
+
 function buildEvaMobileAssistantPrompt(userMessage, context) {
   const limitedContext = limitEvaMobileAssistantContext(context);
   const history = Array.isArray(limitedContext.recentChatHistory) ? limitedContext.recentChatHistory : [];
@@ -1686,6 +1814,49 @@ Rules:
 
 Current EVA context:
 ${JSON.stringify(contextForJson, null, 2)}
+${conversationBlock}
+User: ${userMessage}
+  `.trim();
+}
+
+function buildEvaMobileAssistantSpeechPrompt(userMessage, context) {
+  const limitedContext = limitEvaMobileAssistantContext(context);
+  const history = Array.isArray(limitedContext.recentChatHistory) ? limitedContext.recentChatHistory : [];
+
+  const historyToRender = history.length > 0 && history[history.length - 1]?.role === "user"
+    ? history.slice(0, -1)
+    : history;
+  const conversationBlock = historyToRender.length > 0
+    ? `\nRecent conversation:\n${historyToRender.map((m) => `${m.role === "user" ? "User" : "EVA"}: ${m.content}`).join("\n")}\n`
+    : "";
+
+  const taskLines = limitedContext.tasks.map((t) => `- ${cleanText(t.title || t.task, "Untitled")}`).join("\n");
+  const meetingLines = limitedContext.meetings.map((m) => {
+    const when = [m.date, m.time].filter(Boolean).join(" at ");
+    return `- ${m.title}${when ? ` (${when})` : ""}`;
+  }).join("\n");
+  const reminderLines = limitedContext.reminders.map((r) => `- ${r.title}`).join("\n");
+
+  const contextBlock = [
+    taskLines ? `Current tasks:\n${taskLines}` : "",
+    meetingLines ? `Upcoming meetings:\n${meetingLines}` : "",
+    reminderLines ? `Reminders:\n${reminderLines}` : "",
+  ].filter(Boolean).join("\n\n");
+
+  const behaviorMap = {
+    executive: "Sound polished, calm, and decision-focused.",
+    concise: "Be brief — give the shortest useful reply.",
+    proactive: "Answer clearly, then suggest one useful next step.",
+  };
+  const toneInstruction = behaviorMap[limitedContext.aiBehavior] || behaviorMap.executive;
+
+  return `
+${currentDateContextForPrompt()}
+
+You are EVA, the Executive Virtual Assistant. Speak directly to the AD as if talking out loud.
+Reply in 1–3 complete spoken sentences. Write exactly as you would say it — no JSON, no markdown, no bullet points, no asterisks, no numbered lists.
+${toneInstruction}
+${contextBlock ? `\n${contextBlock}` : ""}
 ${conversationBlock}
 User: ${userMessage}
   `.trim();

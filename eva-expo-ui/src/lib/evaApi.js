@@ -142,6 +142,84 @@ export function sendEvaAssistantCommand({ userMessage, context, messages }) {
   });
 }
 
+export async function streamEvaAssistantCommand({ userMessage, context, messages }, onSentence, onDone) {
+  const safeContext = context || {};
+  const recentChatHistory = Array.isArray(messages) ? messages : [];
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/eva/assistant/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({
+        userMessage,
+        context: safeContext,
+        tasks: Array.isArray(safeContext.tasks) ? safeContext.tasks : [],
+        meetings: Array.isArray(safeContext.meetings) ? safeContext.meetings : [],
+        reminders: Array.isArray(safeContext.reminders) ? safeContext.reminders : [],
+        appMode: safeContext.mode,
+        appStatus: safeContext.appStatus,
+        recentChatHistory,
+        messages: recentChatHistory,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error?.name === "AbortError") {
+      throw new Error("EVA voice stream timed out.", { cause: error });
+    }
+    throw error;
+  }
+
+  if (!response.ok) {
+    clearTimeout(timeoutId);
+    const errText = await response.text().catch(() => "");
+    const errData = errText ? safeJson(errText) : {};
+    const error = new Error(errData?.error || "EVA stream request failed.");
+    error.status = response.status;
+    throw error;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let partial = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      partial += decoder.decode(value, { stream: true });
+      const lines = partial.split("\n");
+      partial = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr) continue;
+        const event = safeJson(jsonStr);
+        if (!event) continue;
+
+        if (event.type === "sentence" && event.text) {
+          onSentence(event.text);
+        } else if (event.type === "done") {
+          await onDone(event.structured, event.fullText);
+        }
+      }
+    }
+  } finally {
+    clearTimeout(timeoutId);
+    reader.releaseLock();
+  }
+}
+
 export async function transcribeEvaAudio(uri, options = {}) {
   const audioUri = String(uri || "").trim();
   if (!audioUri) {

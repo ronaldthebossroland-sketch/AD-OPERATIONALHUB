@@ -19,7 +19,7 @@ import { SectionTitle } from "../components/SectionTitle";
 import { useEVAApp } from "../state/EVAAppContext";
 import { requestMicrophonePermission } from "../lib/devicePermissions";
 import { transcribeEvaAudio } from "../lib/evaApi";
-import { speakEvaReply, stopEvaSpeech } from "../lib/evaSpeech";
+import { createSentenceAudioQueue, stopEvaSpeech } from "../lib/evaSpeech";
 import {
   VOICE_RECORDING_MAX_MS,
   VOICE_RECORDING_OPTIONS,
@@ -39,6 +39,7 @@ export function AssistantScreen({ wakeSignal = 0 }) {
     assistantPrompts,
     chatMessages,
     handleAssistantCommand,
+    handleAssistantCommandStreaming,
     addAssistantNotice,
     updateVoiceIntegrationStatus,
     pauseWakeWordListening,
@@ -59,6 +60,7 @@ export function AssistantScreen({ wakeSignal = 0 }) {
   const pressHeldRef = useRef(false);
   const recordingStartedRef = useRef(false);
   const lastWakeSignalRef = useRef(0);
+  const sentenceQueueRef = useRef(null);
   const audioRecorder = useAudioRecorder(VOICE_RECORDING_OPTIONS);
   const recorderState = useAudioRecorderState(audioRecorder, 250);
   const clearVoiceTimer = useCallback(() => {
@@ -75,24 +77,6 @@ export function AssistantScreen({ wakeSignal = 0 }) {
       stopEvaSpeech();
     };
   }, [audioRecorder, clearVoiceTimer]);
-
-  useEffect(() => {
-    if (!wakeSignal || wakeSignal === lastWakeSignalRef.current) {
-      return undefined;
-    }
-    if (voiceState !== "idle") {
-      return undefined;
-    }
-
-    lastWakeSignalRef.current = wakeSignal;
-    addAssistantNotice("I'm listening. Tell EVA what to do.");
-    const timer = setTimeout(() => {
-      beginVoiceRecording().catch(() => {});
-    }, 550);
-
-    return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wakeSignal, voiceState]);
 
   async function submitMessage(text = draft) {
     const content = text.trim();
@@ -134,6 +118,11 @@ export function AssistantScreen({ wakeSignal = 0 }) {
     recordingStartedRef.current = false;
     setStatus("Requesting microphone");
     setVoiceMessage("");
+    if (sentenceQueueRef.current) {
+      sentenceQueueRef.current.stop();
+      sentenceQueueRef.current = null;
+    }
+    stopEvaSpeech();
     await pauseWakeWordListening?.().catch(() => {});
 
     const permission = await requestMicrophonePermission();
@@ -192,8 +181,6 @@ export function AssistantScreen({ wakeSignal = 0 }) {
         : "Transcribing your command..."
     );
 
-    let submittedTranscript = false;
-
     try {
       const recording = await stopRecording(audioRecorder);
 
@@ -219,15 +206,15 @@ export function AssistantScreen({ wakeSignal = 0 }) {
       setVoiceState("processing");
       setStatus("Working");
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
-      submittedTranscript = true;
-      const spokenReply = await submitMessage(transcript);
+
+      const queue = createSentenceAudioQueue(voiceMode);
+      sentenceQueueRef.current = queue;
+      await handleAssistantCommandStreaming(transcript, (sentence) => {
+        queue.enqueue(sentence);
+      });
+      sentenceQueueRef.current = null;
       setVoiceMessage("");
-      const speechResult = await speakEvaReply(spokenReply, voiceMode);
-      if (!speechResult.ok) {
-        updateVoiceIntegrationStatus({
-          message: speechResult.message,
-        });
-      }
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
     } catch (error) {
       console.warn("EVA voice transcription failed.", error?.message || error);
       updateVoiceIntegrationStatus({
@@ -240,15 +227,29 @@ export function AssistantScreen({ wakeSignal = 0 }) {
     } finally {
       stoppingRef.current = false;
       recordingStartedRef.current = false;
-      if (!submittedTranscript) {
-        setVoiceState("idle");
-        setStatus("Ready");
-      } else {
-        setVoiceState("idle");
-      }
+      setVoiceState("idle");
+      setTimeout(() => setStatus("Ready"), 420);
       resumeWakeWordListening?.({ silent: true }).catch(() => {});
     }
   }
+
+  useEffect(() => {
+    if (!wakeSignal || wakeSignal === lastWakeSignalRef.current) {
+      return undefined;
+    }
+    if (voiceState !== "idle") {
+      return undefined;
+    }
+
+    lastWakeSignalRef.current = wakeSignal;
+    addAssistantNotice("I'm listening. Tell EVA what to do.");
+    const timer = setTimeout(() => {
+      beginVoiceRecording().catch(() => {});
+    }, 550);
+
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wakeSignal, voiceState]);
 
   const processingText =
     voiceState === "listening"

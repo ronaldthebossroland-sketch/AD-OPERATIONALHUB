@@ -28,9 +28,6 @@ export function SettingsScreen() {
     setVoiceMode,
     notificationEnabled,
     toggleNotifications,
-    wakeWordEnabled,
-    wakeWordStatus,
-    toggleWakeWord,
     phoneCalendarSyncEnabled,
     togglePhoneCalendarSync,
     defaultMeetingReminderMinutes,
@@ -62,7 +59,6 @@ export function SettingsScreen() {
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme, layout), [theme, layout]);
   const [integrationStatus, setIntegrationStatus] = useState("");
-  const [wakeWordMessage, setWakeWordMessage] = useState("");
 
   async function runIntegrationAction(action, successCopy) {
     setIntegrationStatus("Checking...");
@@ -175,35 +171,9 @@ export function SettingsScreen() {
           <View style={styles.settingCopy}>
             <Text style={styles.settingTitle}>Hi EVA hands-free</Text>
             <Text style={styles.settingDescription}>
-              {wakeWordEnabled
-                ? wakeWordStatus === "listening"
-                  ? "EVA is listening for Hi EVA with a small phone notification."
-                  : "Hi EVA is enabled and will resume when voice command is free."
-                : "Say Hi EVA to open voice command when this is enabled."}
+              Voice wake word is coming in a future update.
             </Text>
-            {wakeWordMessage ? (
-              <Text style={styles.settingDescription}>{wakeWordMessage}</Text>
-            ) : null}
           </View>
-          <TouchableOpacity
-            activeOpacity={0.84}
-            style={[styles.toggle, wakeWordEnabled && styles.toggleActive]}
-            onPress={async () => {
-              setWakeWordMessage("Checking...");
-              try {
-                const result = await toggleWakeWord();
-                setWakeWordMessage(
-                  result?.ok
-                    ? (wakeWordEnabled ? "Hi EVA is off." : "Hi EVA is listening.")
-                    : (result?.message || "Hi EVA could not start. Build the Android APK first.")
-                );
-              } catch (error) {
-                setWakeWordMessage(error?.message || "Something went wrong.");
-              }
-            }}
-          >
-            <View style={[styles.toggleKnob, wakeWordEnabled && styles.toggleKnobActive]} />
-          </TouchableOpacity>
         </GlowCard>
 
         <SectionTitle title="Calendar & Reminders" />
