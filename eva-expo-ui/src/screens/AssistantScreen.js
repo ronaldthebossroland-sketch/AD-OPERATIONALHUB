@@ -19,7 +19,7 @@ import { SectionTitle } from "../components/SectionTitle";
 import { useEVAApp } from "../state/EVAAppContext";
 import { requestMicrophonePermission } from "../lib/devicePermissions";
 import { transcribeEvaAudio } from "../lib/evaApi";
-import { createSentenceAudioQueue, stopEvaSpeech } from "../lib/evaSpeech";
+import { createSentenceAudioQueue, speakEvaReply, stopEvaSpeech } from "../lib/evaSpeech";
 import {
   VOICE_RECORDING_MAX_MS,
   VOICE_RECORDING_OPTIONS,
@@ -207,14 +207,21 @@ export function AssistantScreen({ wakeSignal = 0 }) {
       setStatus("Working");
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
 
+      let sentenceCount = 0;
       const queue = createSentenceAudioQueue(voiceMode);
       sentenceQueueRef.current = queue;
-      await handleAssistantCommandStreaming(transcript, (sentence) => {
+      const streamedReply = await handleAssistantCommandStreaming(transcript, (sentence) => {
+        sentenceCount++;
         queue.enqueue(sentence);
       });
       sentenceQueueRef.current = null;
       setVoiceMessage("");
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd?.({ animated: true }));
+
+      // Fallback: if streaming produced no audio sentences, speak the reply directly
+      if (sentenceCount === 0 && streamedReply) {
+        await speakEvaReply(streamedReply, voiceMode);
+      }
     } catch (error) {
       console.warn("EVA voice transcription failed.", error?.message || error);
       updateVoiceIntegrationStatus({
