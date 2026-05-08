@@ -1441,7 +1441,10 @@ app.post("/api/eva/assistant", async (req, res) => {
       ...normalizeEvaMobileAssistantRequestContext(req.body),
       conversationMemory: await loadEvaMobileConversationMemory(userMessage, authUserId),
     };
-    const mockResponse = createEvaMobileMockAssistantResponse(userMessage, context);
+    const mockResponse = finalizeEvaMobileAssistantResponse(
+      createEvaMobileMockAssistantResponse(userMessage, context),
+      userMessage
+    );
     const hasAiKey = Boolean(process.env.GEMINI_API_KEY?.trim());
 
     if (!hasAiKey) {
@@ -1452,7 +1455,7 @@ app.post("/api/eva/assistant", async (req, res) => {
 
     try {
       const aiText = await askAI(buildEvaMobileAssistantPrompt(userMessage, context));
-      const structured = sanitizeEvaMobileAssistantResponse(
+      let structured = sanitizeEvaMobileAssistantResponse(
         parseJsonObject(aiText),
         mockResponse
       );
@@ -1461,6 +1464,7 @@ app.post("/api/eva/assistant", async (req, res) => {
         structured.intent = "general_question";
         structured.action = null;
       }
+      structured = finalizeEvaMobileAssistantResponse(structured, userMessage);
 
       const response = { ...structured, mode: "ai" };
       logEvaAssistantDebugResponse(response);
@@ -1507,7 +1511,10 @@ app.post("/api/eva/assistant/stream", async (req, res) => {
       ...normalizeEvaMobileAssistantRequestContext(req.body),
       conversationMemory: await loadEvaMobileConversationMemory(userMessage, authUserId),
     };
-    const mockResponse = createEvaMobileMockAssistantResponse(userMessage, context);
+    const mockResponse = finalizeEvaMobileAssistantResponse(
+      createEvaMobileMockAssistantResponse(userMessage, context),
+      userMessage
+    );
     const hasAiKey = Boolean(process.env.GEMINI_API_KEY?.trim());
 
     if (!hasAiKey) {
@@ -1555,7 +1562,10 @@ app.post("/api/eva/assistant/stream", async (req, res) => {
           parsed.intent = "general_question";
           parsed.action = null;
         }
-        structured = { ...parsed, mode: "ai" };
+        structured = {
+          ...finalizeEvaMobileAssistantResponse(parsed, userMessage),
+          mode: "ai",
+        };
         logEvaAssistantDebugResponse(structured);
       }
 
@@ -1801,8 +1811,10 @@ Rules:
 - If a meeting request includes a clear time anywhere in the conversation (e.g. "by 3 PM", "at 10 AM", "11:30"), return a create_meeting action immediately. If that time has already passed today, set meeting_date to "tomorrow".
 - Meeting title must be specific. Derive it from the attendee name or topic in the conversation (e.g. "Meeting with Pastor Ruda"). Never use "Executive meeting", "Team meeting", or any other generic title unless the user said those exact words.
 - If a task request does not include a usable task title, ask one follow-up question and set action to null.
+- Never use the user's raw command as a task title. Requests like "create a task for me", "can you create a task", or "Hi EVA create a task for me" have no usable title.
 - If a reschedule or cancel request does not identify the meeting clearly enough, ask one follow-up question and set action to null.
 - If a reminder request does not include what to remember, ask one follow-up question and set action to null.
+- Never use the user's raw command as a reminder title. Requests like "create a reminder for me", "set a reminder", or "Hi EVA create a reminder for me" have no reminder subject.
 - If a reminder request includes a specific time, return reminder_time as a full ISO 8601 datetime (e.g. "2025-05-07T11:35:00") using the local date from the context above. Use today's date if the requested time has not yet passed today; use tomorrow's date only if the user explicitly says "tomorrow" or the requested time has already passed. Your reply text must say "today" or "tomorrow" to match the actual date you are scheduling. Never return reminder_time as a bare HH:mm string. If no time is given, set reminder_time to null.
 - If the user clearly requests two or more distinct items in one message (e.g. "create a task AND remind me to follow up at 3 PM"), return them as an "actions" array and set "action" to null. Only use "actions" when there are genuinely two or more independent requests.
 - If the user requests only one item, use "action" only and leave "actions" null.
@@ -2145,6 +2157,141 @@ function sanitizeEvaMobileAssistantAction(action, fallbackAction = null) {
     reminder_time:
       action.reminder_time === null ? null : cleanText(action.reminder_time),
   };
+}
+
+function finalizeEvaMobileAssistantResponse(response, userMessage) {
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+
+  const normalizedResponse = normalizeEvaMobileGeneratedActionTitles(response, userMessage);
+  const vagueAction = findEvaMobileVagueAction(normalizedResponse.action)
+    || (Array.isArray(normalizedResponse.actions)
+      ? normalizedResponse.actions.map((action) => findEvaMobileVagueAction(action)).find(Boolean)
+      : null);
+
+  if (!vagueAction) {
+    return normalizedResponse;
+  }
+
+  if (vagueAction.kind === "reminder") {
+    return {
+      reply: "Sure. What should I remind you about?",
+      intent: "create_reminder",
+      action: null,
+    };
+  }
+
+  return {
+    reply: "Sure. What task should I create?",
+    intent: vagueAction.intent,
+    action: null,
+  };
+}
+
+function normalizeEvaMobileGeneratedActionTitles(response, userMessage) {
+  const next = { ...response };
+
+  if (Object.prototype.hasOwnProperty.call(next, "action")) {
+    next.action = normalizeEvaMobileGeneratedActionTitle(next.action, userMessage);
+  }
+
+  if (Array.isArray(next.actions)) {
+    next.actions = next.actions.map((action) =>
+      normalizeEvaMobileGeneratedActionTitle(action, userMessage)
+    );
+  }
+
+  return next;
+}
+
+function normalizeEvaMobileGeneratedActionTitle(action, userMessage) {
+  if (!action || typeof action !== "object") {
+    return action;
+  }
+
+  const type = action.type;
+  if (!["create_task", "create_follow_up_action", "create_reminder"].includes(type)) {
+    return action;
+  }
+
+  const title = cleanText(action.title);
+  const normalizedTitle = normalizeEvaMobileTitleForVagueCheck(title);
+  const normalizedRawUserMessage = normalizeEvaMobileTitleForVagueCheck(userMessage);
+  const normalizedStrippedUserMessage = normalizeEvaMobileTitleForVagueCheck(
+    stripEvaMobileAssistantRequestFiller(userMessage)
+  );
+  const looksLikeRawUserCommand =
+    normalizedTitle &&
+    (normalizedTitle === normalizedRawUserMessage || normalizedTitle === normalizedStrippedUserMessage);
+
+  if (!looksLikeRawUserCommand) {
+    return action;
+  }
+
+  const extractedTitle = type === "create_reminder"
+    ? extractEvaMobileReminderTitle(userMessage)
+    : extractEvaMobileTaskTitle(userMessage);
+
+  return extractedTitle ? { ...action, title: extractedTitle } : action;
+}
+
+function findEvaMobileVagueAction(action) {
+  if (!action || typeof action !== "object") {
+    return null;
+  }
+
+  if (action.type === "create_reminder" && isVagueEvaMobileActionTitle(action.title, "reminder")) {
+    return { kind: "reminder", intent: "create_reminder" };
+  }
+
+  if (
+    (action.type === "create_task" || action.type === "create_follow_up_action") &&
+    isVagueEvaMobileActionTitle(action.title, "task")
+  ) {
+    return { kind: "task", intent: action.type };
+  }
+
+  return null;
+}
+
+function isVagueEvaMobileActionTitle(title, type) {
+  const cleaned = stripEvaMobileAssistantRequestFiller(title);
+  const lower = normalizeEvaMobileTitleForVagueCheck(cleaned);
+
+  if (!lower) {
+    return true;
+  }
+
+  const noun = type === "reminder"
+    ? "(reminder|alarm)"
+    : "(task|todo|to do|to-do|action item|follow up|follow-up)";
+  const vagueTitlePattern = new RegExp(
+    `^(create|add|make|set|schedule)?\\s*(a\\s+)?${noun}\\s*(for\\s+(me|us)|please)?$`,
+    "i"
+  );
+
+  if (vagueTitlePattern.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+function stripEvaMobileAssistantRequestFiller(text) {
+  return cleanText(text)
+    .replace(/^\s*(hi|hey|hello)\s+eva[,.]?\s*/i, "")
+    .replace(/^\s*(can|could|would)\s+you\s*/i, "")
+    .replace(/^\s*please\s*/i, "")
+    .trim();
+}
+
+function normalizeEvaMobileTitleForVagueCheck(text) {
+  return cleanText(text)
+    .toLowerCase()
+    .replace(/[?.!,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizeEvaMobileAssistantIntent(value) {
@@ -2594,14 +2741,16 @@ function createEvaMobileMockAssistantResponse(userMessage, context = {}) {
 }
 
 function extractEvaMobileTaskTitle(text) {
-  const cleaned = cleanText(text)
+  const cleaned = stripEvaMobileAssistantRequestFiller(text)
     .replace(/^(please\s+)?(create|add|make|set)\s+(a\s+)?(task|todo|to-do|action item)\s*(for|to)?\s*/i, "")
     .replace(/\b(today|tomorrow|next week)\b/gi, "")
     .replace(/\b(?:by|due|on)\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\b/gi, "")
     .replace(/\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/i, "")
     .trim();
 
-  return cleaned ? capitalizeEvaMobileTitle(cleaned) : "";
+  return isVagueEvaMobileActionTitle(cleaned, "task")
+    ? ""
+    : capitalizeEvaMobileTitle(cleaned);
 }
 
 function isEvaMobileScheduleQuestion(lower) {
@@ -2637,14 +2786,14 @@ function extractEvaMobilePendingReminderTitle(context) {
 }
 
 function extractEvaMobileReminderTitle(text) {
-  const cleaned = cleanText(text)
+  const cleaned = stripEvaMobileAssistantRequestFiller(text)
     .replace(/^(please\s+)?remind\s+me\s+(to|about)\s*/i, "")
     .replace(/^(please\s+)?(set|create|add)\s+(a\s+)?(reminder|alarm)\s*(for|to)?\s*/i, "")
     .replace(/\s+(?:at|by|for)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/gi, "")
     .replace(/\s+(?:at|by|for)\s+\d{1,2}:\d{2}\b/g, "")
     .trim();
 
-  return cleaned;
+  return isVagueEvaMobileActionTitle(cleaned, "reminder") ? "" : cleaned;
 }
 
 function extractEvaMobileAttendee(text) {

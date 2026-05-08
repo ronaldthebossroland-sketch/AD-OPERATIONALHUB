@@ -2394,16 +2394,15 @@ export function EVAAppProvider({ children }) {
     };
   }
 
-  function adaptAssistantReply(reply, result = {}) {
-    const text = String(reply || "").trim();
-    const actionType = String(result?.action?.type || result?.intent || "").toLowerCase();
+  function adaptAssistantReply(reply) {
+    const text = stripRecommendedNextMove(String(reply || "").trim());
 
     if (aiBehavior === "concise") {
       return makeConciseReply(text);
     }
 
     if (aiBehavior === "proactive") {
-      return makeProactiveReply(text, actionType);
+      return text || "Done.";
     }
 
     return text || "Captured. I will keep this aligned with your executive workflow.";
@@ -2928,37 +2927,10 @@ function makeConciseReply(reply) {
     : usefulSentence;
 }
 
-function makeProactiveReply(reply, actionType) {
-  const text = String(reply || "").trim() || "Done.";
-  const suggestion = proactiveSuggestionFor(actionType);
-
-  if (!suggestion || text.includes("Recommended next move")) {
-    return text;
-  }
-
-  return `${text}\n\nRecommended next move: ${suggestion}`;
-}
-
-function proactiveSuggestionFor(actionType) {
-  switch (actionType) {
-    case "create_task":
-    case "create_follow_up_action":
-      return "assign an owner and add a reminder so this does not sit unattended.";
-    case "create_meeting":
-      return "add a short agenda and confirm who owns the follow-up after the meeting.";
-    case "create_reminder":
-      return "connect this reminder to a task or meeting if it belongs to a larger outcome.";
-    case "prepare_meeting_briefing":
-      return "review risks, decisions needed, and the one outcome you want from the meeting.";
-    case "show_today_schedule":
-      return "protect one open block for preparation before your highest-stakes meeting.";
-    case "show_pending_tasks":
-      return "clear or delegate the highest-priority open task first.";
-    case "summarize_notes":
-      return "turn the key decisions and risks into a task or briefing for immediate action.";
-    default:
-      return "";
-  }
+function stripRecommendedNextMove(reply) {
+  return String(reply || "")
+    .replace(/\n*\s*Recommended next move:\s*[\s\S]*$/i, "")
+    .trim();
 }
 
 function inferLocalActionType(text) {
@@ -3252,13 +3224,13 @@ function permissionStatusLabel(permission = {}) {
 }
 
 function extractTaskTitle(text) {
-  const cleaned = text
+  const cleaned = stripAssistantRequestFiller(text)
     .replace(/^(please\s+)?(create|add|make|set)\s+(a\s+)?(task|todo|to-do|follow-up|follow up|action item)\s*(for|to)?\s*/i, "")
     .replace(/\b(today|tomorrow|next week)\b/gi, "")
     .replace(/\b(?:by|due|on)\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\b/gi, "")
     .replace(/\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/i, "")
     .trim();
-  return cleaned ? capitalizeTitle(cleaned) : "";
+  return isVagueActionTitle(cleaned, "task") ? "" : capitalizeTitle(cleaned);
 }
 
 function extractMeetingTitle(text) {
@@ -3309,15 +3281,39 @@ function extractAttendees(text) {
 }
 
 function extractReminderTitle(text) {
-  const cleaned = text
+  const cleaned = stripAssistantRequestFiller(text)
     .replace(/^(please\s+)?remind\s+me\s+(to|about)\s*/i, "")
     .replace(/^(please\s+)?(set|create|add)\s+(a\s+)?(reminder|alarm)\s*(for|to)?\s*/i, "")
     .replace(/\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)\b/i, "")
     .trim();
-  return cleaned ? capitalizeTitle(cleaned) : "";
+  return isVagueActionTitle(cleaned, "reminder") ? "" : capitalizeTitle(cleaned);
 }
 
 function capitalizeTitle(text) {
   const cleaned = String(text || "").trim();
   return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : "";
+}
+
+function stripAssistantRequestFiller(text) {
+  return String(text || "")
+    .replace(/^\s*(hi|hey|hello)\s+eva[,.]?\s*/i, "")
+    .replace(/^\s*(can|could|would)\s+you\s*/i, "")
+    .replace(/^\s*please\s*/i, "")
+    .trim();
+}
+
+function isVagueActionTitle(title, type) {
+  const lower = String(title || "")
+    .toLowerCase()
+    .replace(/[?.!,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!lower) {
+    return true;
+  }
+
+  const noun = type === "reminder" ? "(reminder|alarm)" : "(task|todo|to do|to-do|action item)";
+  return new RegExp(`^(create|add|make|set|schedule)?\\s*(a\\s+)?${noun}\\s*(for\\s+me|for\\s+us|please)?$`, "i")
+    .test(lower);
 }

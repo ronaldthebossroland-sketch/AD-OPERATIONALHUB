@@ -265,6 +265,7 @@ export async function scheduleReminderNotification(reminder) {
     return notificationFailure("missing_date_time", "Reminder time is missing or could not be parsed.");
   }
 
+  triggerAt = normalizeReminderTriggerDate(triggerAt);
   const msUntilTrigger = triggerAt.getTime() - Date.now();
   if (msUntilTrigger <= 0) {
     return notificationFailure("skipped_past_due", "Reminder time is already in the past.");
@@ -301,6 +302,21 @@ export async function scheduleReminderNotification(reminder) {
       error?.message || "Could not schedule the reminder notification."
     );
   }
+}
+
+function normalizeReminderTriggerDate(triggerAt) {
+  const date = new Date(triggerAt);
+  const now = new Date();
+  const msUntilTrigger = date.getTime() - now.getTime();
+
+  // If the user creates a reminder for the current minute, the parsed time has
+  // seconds set to zero and can be treated as already past. Keep it useful by
+  // scheduling it a few seconds from now instead of silently skipping it.
+  if (msUntilTrigger > -60_000 && msUntilTrigger < 5_000) {
+    return new Date(now.getTime() + 5_000);
+  }
+
+  return date;
 }
 
 export async function addNotificationResponseListener(handler) {
