@@ -1,5 +1,7 @@
+import { Platform } from "react-native";
 import * as Calendar from "expo-calendar";
 import Constants from "expo-constants";
+import * as IntentLauncher from "expo-intent-launcher";
 import {
   getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
@@ -77,6 +79,34 @@ async function getNotificationsModule() {
   } catch (error) {
     console.warn("EVA notifications are unavailable.", error?.message || error);
     return null;
+  }
+}
+
+export async function requestBatteryOptimizationExemption() {
+  if (Platform.OS !== "android" || isExpoGoRuntime()) {
+    return { ok: false, reason: "not_applicable" };
+  }
+
+  const pkg =
+    Constants.expoConfig?.android?.package ??
+    Constants.manifest?.android?.package ??
+    "com.adoperationalhub.eva";
+
+  try {
+    await IntentLauncher.startActivityAsync(
+      "android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+      { data: `package:${pkg}` }
+    );
+    return { ok: true };
+  } catch {
+    try {
+      await IntentLauncher.startActivityAsync(
+        "android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS"
+      );
+      return { ok: true, usedFallback: true };
+    } catch (err) {
+      return { ok: false, reason: err?.message || "unavailable" };
+    }
   }
 }
 

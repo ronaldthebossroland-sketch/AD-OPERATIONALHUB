@@ -47,6 +47,7 @@ import {
   checkMicrophonePermission,
   checkNotificationPermissions,
   requestMicrophonePermission,
+  requestBatteryOptimizationExemption,
   requestCalendarPermissions,
   requestNotificationPermissions,
 } from "../lib/devicePermissions";
@@ -1894,6 +1895,13 @@ export function EVAAppProvider({ children }) {
 
           if (notificationResult.ok) {
             setNotificationPermissionStatus("connected");
+            AsyncStorage.getItem("eva:battery_exemption_asked").then((asked) => {
+              if (!asked) {
+                requestBatteryOptimizationExemption().finally(() => {
+                  AsyncStorage.setItem("eva:battery_exemption_asked", "1").catch(() => {});
+                });
+              }
+            }).catch(() => {});
             return;
           }
 
@@ -2189,9 +2197,12 @@ export function EVAAppProvider({ children }) {
     }
 
     if (actionType === "create_task" || actionType === "create_follow_up_action") {
-      const title = action.title || extractTaskTitle(content);
+      const rawTaskTitle = String(action.title || "").trim();
+      const title = isVagueActionTitle(rawTaskTitle, "task")
+        ? extractTaskTitle(content)
+        : (rawTaskTitle || extractTaskTitle(content));
       if (!title) {
-        return response?.reply || "Sure. What task should I create?";
+        return response?.reply || "Sure. What should I name this task?";
       }
 
       const task = addTask({
@@ -2252,7 +2263,10 @@ export function EVAAppProvider({ children }) {
     }
 
     if (actionType === "create_reminder") {
-      const title = action.title || extractReminderTitle(content);
+      const rawReminderTitle = String(action.title || "").trim();
+      const title = isVagueActionTitle(rawReminderTitle, "reminder")
+        ? extractReminderTitle(content)
+        : (rawReminderTitle || extractReminderTitle(content));
       if (!title) {
         return response?.reply || "Sure. What should I remind you about?";
       }
@@ -2312,7 +2326,10 @@ export function EVAAppProvider({ children }) {
     for (const extra of actions) {
       const type = normalizeAssistantActionType(String(extra?.type || "").toLowerCase());
       if (type === "create_task" || type === "create_follow_up_action") {
-        const title = String(extra.title || "").trim() || extractTaskTitle(content);
+        const rawTitle = String(extra.title || "").trim();
+        const title = isVagueActionTitle(rawTitle, "task")
+          ? extractTaskTitle(content)
+          : (rawTitle || extractTaskTitle(content));
         if (title) {
           addTask({
             title,
@@ -2323,7 +2340,10 @@ export function EVAAppProvider({ children }) {
         }
       } else if (type === "create_meeting") {
         const startTime = extra.start_time || extra.startTime || extra.time;
-        const title = String(extra.title || "").trim();
+        const rawTitle = String(extra.title || "").trim();
+        const title = isGenericMeetingTitle(rawTitle)
+          ? (extractMeetingTitle(content) || "Meeting")
+          : rawTitle;
         if (startTime && title) {
           await addMeeting({
             title,
@@ -2334,7 +2354,10 @@ export function EVAAppProvider({ children }) {
           });
         }
       } else if (type === "create_reminder") {
-        const title = String(extra.title || "").trim() || extractReminderTitle(content);
+        const rawTitle = String(extra.title || "").trim();
+        const title = isVagueActionTitle(rawTitle, "reminder")
+          ? extractReminderTitle(content)
+          : (rawTitle || extractReminderTitle(content));
         const schedule = getAssistantReminderSchedule(extra);
         if (title && schedule.hasSchedule) {
           addReminder({
@@ -2928,9 +2951,10 @@ function makeConciseReply(reply) {
 }
 
 function stripRecommendedNextMove(reply) {
-  return String(reply || "")
-    .replace(/\n*\s*Recommended next move:\s*[\s\S]*$/i, "")
-    .trim();
+  const text = String(reply || "");
+  const markerIndex = text.search(/\n?\s*Recommended next move:/i);
+  if (markerIndex === -1) return text.trim();
+  return text.slice(0, markerIndex).trim();
 }
 
 function inferLocalActionType(text) {
@@ -3255,7 +3279,18 @@ function stripMeetingDateWords(name) {
 }
 
 function isGenericMeetingTitle(title) {
-  return !title || /^(executive|team|new|a|the)\s+meeting$/i.test(title.trim());
+  if (!title) return true;
+  const t = title.trim();
+  // Obvious placeholder/template titles
+  if (/^(executive|team|new|a|the)\s+meeting$/i.test(t)) return true;
+  // Command-like strings — Gemini passed the raw request back as the title
+  if (/^(hi|hey|hello)\s+eva\b/i.test(t)) return true;
+  if (/^(can|could|would)\s+you\b/i.test(t)) return true;
+  if (/^i\s+(need|want|would like)\s+(to|you\s+to)\b/i.test(t)) return true;
+  if (/^(please\s+)?(create|schedule|set up|book|add)\s+a?\s*(new\s+)?meeting\b/i.test(t)) return true;
+  // Suspiciously long — full command echoed as title
+  if (t.length > 80) return true;
+  return false;
 }
 
 function extractMeetingDate(text) {
@@ -3309,9 +3344,19 @@ function isVagueActionTitle(title, type) {
     .replace(/\s+/g, " ")
     .trim();
 
-  if (!lower) {
-    return true;
-  }
+  if (!lower) return true;
+
+  // Single vague pronoun/word with no real meaning as a title
+  if (/^(me|it|this|that|one|us|something|stuff|thing|things|these|those|them|anything|everything)$/.test(lower)) return true;
+
+  // Command-style openers — Gemini echoed the raw request instead of extracting a title
+  if (/^(hi|hey|hello)\s+eva\b/i.test(lower)) return true;
+  if (/^(can|could|would)\s+you\b/i.test(lower)) return true;
+  if (/^i\s+(need|want|would like)\s+(to|you\s+to)\b/i.test(lower)) return true;
+  if (/^please\s+(create|add|make|set|remind|schedule)\b/i.test(lower)) return true;
+
+  // Suspiciously long — almost certainly the full voice command, not a title
+  if (lower.length > 70) return true;
 
   const noun = type === "reminder" ? "(reminder|alarm)" : "(task|todo|to do|to-do|action item)";
   return new RegExp(`^(create|add|make|set|schedule)?\\s*(a\\s+)?${noun}\\s*(for\\s+me|for\\s+us|please)?$`, "i")

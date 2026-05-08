@@ -40,6 +40,7 @@ export function DocumentsScreen() {
   const transcribingRef = useRef(false);
   const segmentTimerRef = useRef(null);
   const segmentResolveRef = useRef(null);
+  const segmentErrorCountRef = useRef(0);
   const audioRecorder = useAudioRecorder(VOICE_RECORDING_OPTIONS);
 
   useEffect(() => {
@@ -74,6 +75,7 @@ export function DocumentsScreen() {
       setSegmentStatus("recording");
       await audioRecorder.prepareToRecordAsync();
       audioRecorder.record();
+      segmentErrorCountRef.current = 0;
       await new Promise((resolve) => {
         segmentResolveRef.current = resolve;
         segmentTimerRef.current = setTimeout(() => {
@@ -100,6 +102,11 @@ export function DocumentsScreen() {
     } catch (error) {
       if (transcribingRef.current) {
         console.warn("EVA live transcription segment failed.", error?.message || error);
+        segmentErrorCountRef.current += 1;
+        if (segmentErrorCountRef.current >= 5) {
+          stopLiveTranscription();
+          return;
+        }
       }
     }
     if (transcribingRef.current) {

@@ -115,6 +115,7 @@ async function normalizeAIError(error) {
 }
 
 const ABBREVIATION_RE = /\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|e\.g|i\.e|approx|est|dept|govt|inc|corp|ltd)\.$/i;
+const NUMBERED_LIST_RE = /\b\d+\.$/;
 
 function flushSentences(buffer, isEnd = false) {
   const sentences = [];
@@ -125,7 +126,11 @@ function flushSentences(buffer, isEnd = false) {
   while ((m = pattern.exec(buffer)) !== null) {
     const sentence = buffer.slice(last, m.index + 1).trim();
     last = m.index + 1 + m[1].length;
-    if (sentence.length >= 8 && !ABBREVIATION_RE.test(sentence)) {
+    if (
+      sentence.length >= 8 &&
+      !ABBREVIATION_RE.test(sentence) &&
+      !NUMBERED_LIST_RE.test(sentence)
+    ) {
       sentences.push(sentence);
     }
   }

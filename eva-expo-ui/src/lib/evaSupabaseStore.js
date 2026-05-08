@@ -11,16 +11,14 @@ export async function loadEvaSupabaseData(userId) {
   ensureSupabase();
   const activeUserId = requireUserId(userId);
 
+  // Phase 1: load user-scoped data and workspace membership in parallel
   const [
     tasksResult,
-    workspaceTasks,
     meetingsResult,
     remindersResult,
     documentsResult,
     preferencesResult,
     workspaces,
-    workspaceMeetings,
-    workspaceReminders,
   ] =
     await Promise.all([
       supabase
@@ -30,7 +28,6 @@ export async function loadEvaSupabaseData(userId) {
         .eq("user_id", activeUserId)
         .gte("created_at", EVA_CLEAN_DATA_CUTOFF)
         .order("created_at", { ascending: false }),
-      loadSupabaseWorkspaceTasks(activeUserId),
       supabase
         .from("meetings")
         .select("*")
@@ -61,8 +58,6 @@ export async function loadEvaSupabaseData(userId) {
         .limit(1)
         .maybeSingle(),
       loadSupabaseWorkspaces(activeUserId),
-      loadSupabaseWorkspaceMeetings(activeUserId),
-      loadSupabaseWorkspaceReminders(activeUserId),
     ]);
 
   throwIfError(tasksResult.error);
@@ -71,10 +66,16 @@ export async function loadEvaSupabaseData(userId) {
   throwIfError(documentsResult.error);
   throwIfError(preferencesResult.error);
 
-  const [chat, profile] = await Promise.all([
-    loadLatestAssistantChat(activeUserId),
-    loadLatestProfile(activeUserId),
-  ]);
+  // Phase 2: scope workspace data to the user's own workspace IDs
+  const workspaceIds = workspaces.map((w) => w.id).filter(Boolean);
+  const [workspaceTasks, workspaceMeetings, workspaceReminders, chat, profile] =
+    await Promise.all([
+      loadSupabaseWorkspaceTasks(workspaceIds),
+      loadSupabaseWorkspaceMeetings(workspaceIds),
+      loadSupabaseWorkspaceReminders(workspaceIds),
+      loadLatestAssistantChat(activeUserId),
+      loadLatestProfile(activeUserId),
+    ]);
 
   return {
     tasks: dedupeRowsById([...(tasksResult.data || []), ...workspaceTasks])
@@ -383,15 +384,15 @@ async function insertWorkspaceMember(payload) {
   return data;
 }
 
-async function loadSupabaseWorkspaceTasks(userId) {
-  requireUserId(userId);
+async function loadSupabaseWorkspaceTasks(workspaceIds) {
+  if (!Array.isArray(workspaceIds) || !workspaceIds.length) return [];
 
   try {
     const { data, error } = await supabase
       .from("tasks")
       .select("*")
       .eq("app_source", APP_SOURCE)
-      .not("workspace_id", "is", null)
+      .in("workspace_id", workspaceIds)
       .gte("created_at", EVA_CLEAN_DATA_CUTOFF)
       .order("created_at", { ascending: false });
 
@@ -407,15 +408,15 @@ async function loadSupabaseWorkspaceTasks(userId) {
   }
 }
 
-async function loadSupabaseWorkspaceMeetings(userId) {
-  requireUserId(userId);
+async function loadSupabaseWorkspaceMeetings(workspaceIds) {
+  if (!Array.isArray(workspaceIds) || !workspaceIds.length) return [];
 
   try {
     const { data, error } = await supabase
       .from("meetings")
       .select("*")
       .eq("app_source", APP_SOURCE)
-      .not("workspace_id", "is", null)
+      .in("workspace_id", workspaceIds)
       .gte("created_at", EVA_CLEAN_DATA_CUTOFF)
       .order("created_at", { ascending: false });
 
@@ -431,15 +432,15 @@ async function loadSupabaseWorkspaceMeetings(userId) {
   }
 }
 
-async function loadSupabaseWorkspaceReminders(userId) {
-  requireUserId(userId);
+async function loadSupabaseWorkspaceReminders(workspaceIds) {
+  if (!Array.isArray(workspaceIds) || !workspaceIds.length) return [];
 
   try {
     const { data, error } = await supabase
       .from("reminders")
       .select("*")
       .eq("app_source", APP_SOURCE)
-      .not("workspace_id", "is", null)
+      .in("workspace_id", workspaceIds)
       .gte("created_at", EVA_CLEAN_DATA_CUTOFF)
       .order("created_at", { ascending: false });
 

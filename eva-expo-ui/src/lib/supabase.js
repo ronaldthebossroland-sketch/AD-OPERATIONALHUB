@@ -35,8 +35,10 @@ export const supabase = isSupabaseConfigured
     })
   : null;
 
+export let appStateSubscription = null;
+
 if (supabase) {
-  AppState.addEventListener("change", (state) => {
+  appStateSubscription = AppState.addEventListener("change", (state) => {
     if (state === "active") {
       supabase.auth.startAutoRefresh();
     } else {

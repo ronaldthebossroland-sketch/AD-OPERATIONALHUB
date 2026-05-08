@@ -357,7 +357,7 @@ function safeJson(text) {
   try {
     return JSON.parse(text);
   } catch {
-    return { error: text };
+    return { error: "Server error" };
   }
 }
 
