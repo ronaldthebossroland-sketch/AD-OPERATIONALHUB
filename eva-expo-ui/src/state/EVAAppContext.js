@@ -2057,11 +2057,33 @@ export function EVAAppProvider({ children }) {
         }
       );
     } catch (error) {
-      console.warn("EVA stream backend unavailable. Using local preview logic.", error?.message || error);
-      setAssistantConnection({ backend: "offline", ai: "fallback" });
-      reply = adaptAssistantReply(await runLocalAssistantCommand(content), {
-        intent: inferLocalActionType(content),
-      });
+      console.warn("EVA stream backend unavailable. Trying standard assistant route.", error?.message || error);
+      try {
+        const response = await sendEvaAssistantCommand({
+          userMessage: content,
+          context: buildAssistantContext(),
+          messages: [...recentMessages, userMessage]
+            .slice(-12)
+            .map(({ role, content: c }) => ({ role, content: c })),
+        });
+        debugEvaFlow("assistant: backend response", summarizeAssistantResponse(response));
+        setAssistantConnection({
+          backend: "connected",
+          ai: response?.mode === "ai" ? "gemini" : "fallback",
+        });
+        const rawReply = await applyAssistantRouteResult(response, content);
+        await applyCompoundActions(response?.actions, content);
+        reply = adaptAssistantReply(rawReply, {
+          intent: response?.intent,
+          action: response?.action,
+        });
+      } catch (fallbackError) {
+        console.warn("EVA assistant backend unavailable. Using local preview logic.", fallbackError?.message || fallbackError);
+        setAssistantConnection({ backend: "offline", ai: "fallback" });
+        reply = adaptAssistantReply(await runLocalAssistantCommand(content), {
+          intent: inferLocalActionType(content),
+        });
+      }
     }
 
     const assistantMessage = {
@@ -2083,10 +2105,13 @@ export function EVAAppProvider({ children }) {
       const reminderTitle = extractReminderTitle(content);
       if (!reminderTitle) {
         reply = "Sure. What should I remind you about?";
+      } else if (!extractTime(content, "")) {
+        reply = `Sure. When would you like to be reminded about "${reminderTitle}"?`;
       } else {
         const reminder = addReminder({
           title: reminderTitle,
           due: extractDueDate(content),
+          reminder_time: extractTime(content, ""),
         });
         reply = `Reminder set: ${reminder.title}, ${reminder.due}.`;
       }
@@ -2133,6 +2158,8 @@ export function EVAAppProvider({ children }) {
       const taskTitle = extractTaskTitle(content);
       if (!taskTitle) {
         reply = "Sure. What task should I create?";
+      } else if (!hasExplicitDueDate(content)) {
+        reply = `Got it. When should "${taskTitle}" be done by? And what priority — low, medium, or high?`;
       } else {
         const task = addTask({
           title: taskTitle,
@@ -2145,11 +2172,14 @@ export function EVAAppProvider({ children }) {
     } else if (isMeetingIntent(lower)) {
       const meetingTime = extractTime(content, "");
       const attendees = extractAttendees(content);
-      if (!meetingTime) {
+      const meetingTitle = extractMeetingTitle(content);
+      if (!meetingTitle || isGenericMeetingTitle(meetingTitle)) {
+        reply = "Sure. Who is this meeting with, or what's it about?";
+      } else if (!meetingTime) {
         reply = `Sure. What time should I schedule the meeting${attendees && attendees !== "Team" ? ` with ${attendees}` : ""}?`;
       } else {
         const meeting = await addMeeting({
-          title: extractMeetingTitle(content),
+          title: meetingTitle,
           date: extractMeetingDate(content),
           time: meetingTime,
           attendees,
@@ -3058,6 +3088,15 @@ function extractDueDate(text) {
     return "Next week";
   }
   return "Today";
+}
+
+function hasExplicitDueDate(text) {
+  const lower = String(text || "").toLowerCase();
+  return (
+    /\b(today|tomorrow|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(lower) ||
+    /\b(?:on|by|due|before|after)\s+(?:the\s+)?\d{1,2}(?:st|nd|rd|th)?\b/.test(lower) ||
+    /\b\d{4}-\d{2}-\d{2}\b/.test(lower)
+  );
 }
 
 function extractTime(text, fallback = "10:00 AM") {
