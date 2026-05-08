@@ -110,6 +110,35 @@ export async function requestBatteryOptimizationExemption() {
   }
 }
 
+export async function requestExactAlarmPermission() {
+  if (Platform.OS !== "android" || isExpoGoRuntime()) {
+    return { ok: false, reason: "not_applicable" };
+  }
+
+  const pkg =
+    Constants.expoConfig?.android?.package ??
+    Constants.manifest?.android?.package ??
+    "com.adoperationalhub.eva";
+
+  try {
+    await IntentLauncher.startActivityAsync(
+      "android.settings.REQUEST_SCHEDULE_EXACT_ALARM",
+      { data: `package:${pkg}` }
+    );
+    return { ok: true };
+  } catch {
+    try {
+      await IntentLauncher.startActivityAsync(
+        "android.settings.APPLICATION_DETAILS_SETTINGS",
+        { data: `package:${pkg}` }
+      );
+      return { ok: true, usedFallback: true };
+    } catch (err) {
+      return { ok: false, reason: err?.message || "unavailable" };
+    }
+  }
+}
+
 export function isExpoGoRuntime() {
   return (
     Constants.appOwnership === "expo" ||

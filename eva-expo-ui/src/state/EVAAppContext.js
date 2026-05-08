@@ -48,6 +48,7 @@ import {
   checkNotificationPermissions,
   requestMicrophonePermission,
   requestBatteryOptimizationExemption,
+  requestExactAlarmPermission,
   requestCalendarPermissions,
   requestNotificationPermissions,
 } from "../lib/devicePermissions";
@@ -1899,6 +1900,13 @@ export function EVAAppProvider({ children }) {
               if (!asked) {
                 requestBatteryOptimizationExemption().finally(() => {
                   AsyncStorage.setItem("eva:battery_exemption_asked", "1").catch(() => {});
+                });
+              }
+            }).catch(() => {});
+            AsyncStorage.getItem("eva:exact_alarm_asked").then((asked) => {
+              if (!asked) {
+                requestExactAlarmPermission().finally(() => {
+                  AsyncStorage.setItem("eva:exact_alarm_asked", "1").catch(() => {});
                 });
               }
             }).catch(() => {});

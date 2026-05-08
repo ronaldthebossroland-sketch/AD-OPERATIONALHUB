@@ -57,7 +57,7 @@
       [
         "expo-notifications",
         {
-          "defaultChannel": "eva-reminders-v2",
+          "defaultChannel": "eva-reminders-v3",
           "sounds": ["assets/sounds/eva_reminder_chime.wav"]
         }
       ],
